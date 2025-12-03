@@ -31,6 +31,8 @@ class RealTimeOrchestrator:
         self.alerts: Dict[str, Alert] = {}
         self.total_processed = 0
         self.recent_scores: List[float] = []
+        self.alert_history: List[Alert] = []
+        self.medium_flags = 0
 
     async def start(self) -> None:
         await asyncio.gather(
@@ -56,10 +58,13 @@ class RealTimeOrchestrator:
                     created_at=datetime.utcnow(),
                 )
                 self.alerts[alert.id] = alert
+                self.alert_history.append(alert)
+                self.alert_history = self.alert_history[-10:]
                 case = self.case_manager.attach_alert(alert)
                 print(f"  -> ALERT {alert.id} assigned to {case.id} ({len(case.alerts)} alerts)")
             elif risk_level == "Medium":
                 print("  -> Flagged for review (Medium risk)")
+                self.medium_flags += 1
 
             self.total_processed += 1
 
@@ -73,14 +78,14 @@ class RealTimeOrchestrator:
     def _print_dashboard(self) -> None:
         open_cases = [c for c in self.case_manager.summary() if c.status != "Closed"]
         high_risk = len(self.alerts)
-        medium_flags = self.total_processed - high_risk
         print("\n==== Echtzeit-Dashboard ====")
         print(f"Verarbeitete Transaktionen: {self.total_processed}")
-        print(f"Alerts gesamt: {high_risk} | Flags (Medium): {medium_flags}")
+        print(f"Alerts gesamt: {high_risk} | Flags (Medium): {self.medium_flags}")
         print(f"Offene Cases: {len(open_cases)}")
         self._print_case_statuses()
         self._print_score_window()
         self._print_domain_breakdown()
+        self._print_recent_alerts()
         print("Top-Axiome (Hits):")
         top_indicators = self._aggregate_indicator_hits()
         for code, count in top_indicators.items():
@@ -108,6 +113,20 @@ class RealTimeOrchestrator:
         print("Domain-Breakdown:")
         for domain, count in domain_counts.items():
             print(f"- {domain}: {count}")
+
+    def _print_recent_alerts(self) -> None:
+        if not self.alert_history:
+            print("Letzte Alerts: (keine)")
+            return
+        print("Letzte Alerts (max 3):")
+        for alert in self.alert_history[-3:]:
+            hits = [h for h in alert.evaluated_indicators if h.is_hit]
+            rationales = ", ".join(
+                f"{hit.indicator.code} ({hit.explanation or 'Hit'})" for hit in hits[:2]
+            )
+            print(
+                f"- {alert.id} Score {alert.score:.1f} [{alert.transaction.counterparty_country} -> {alert.transaction.channel}] {rationales}"
+            )
 
     def _print_case_statuses(self) -> None:
         statuses: Dict[str, int] = {"Open": 0, "Investigating": 0, "Closed": 0}

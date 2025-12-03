@@ -19,8 +19,11 @@ class TransactionIngestionService:
                 self._scenario_structuring,
                 self._scenario_conflict_region,
                 self._scenario_high_income_spike,
+                self._scenario_crypto_mixer_burst,
+                self._scenario_refund_carousel,
                 self._scenario_conflict_donation,
                 self._scenario_luxury_pep_spree,
+                self._scenario_offshore_hopping,
                 self._scenario_generic,
             ]
         )
@@ -122,6 +125,42 @@ class TransactionIngestionService:
             purpose="Luxury spend spree",
         )
 
+    def _scenario_crypto_mixer_burst(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(300, 4500), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["RU", "UA", "PA", "KY"]),
+            channel=random.choice(["tor", "unknown_device", "mobile"]),
+            is_credit=True,
+            purpose="Crypto mixer payout",
+        )
+
+    def _scenario_refund_carousel(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(3000, 9000), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["US", "DE", "GB", "FR"]),
+            channel=random.choice(["web", "mobile", "branch"]),
+            is_credit=False,
+            purpose="Refund after large purchase",
+        )
+
+    def _scenario_offshore_hopping(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(6500, 18000), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["PA", "KY", "VG", "MT", "IM"]),
+            channel=random.choice(["web", "mobile", "unknown_device"]),
+            is_credit=False,
+            purpose="Offshore routing",
+        )
+
 
 def sample_customers() -> List[Customer]:
     return [
@@ -149,6 +188,22 @@ def sample_customers() -> List[Customer]:
             is_pep=False,
             annual_declared_income=2_400_000,
         ),
+        Customer(
+            id="cust-4",
+            customer_id="C1004",
+            name="Frontier Aid",
+            country="DE",
+            is_pep=False,
+            annual_declared_income=180_000,
+        ),
+        Customer(
+            id="cust-5",
+            customer_id="C1005",
+            name="Lux Holdings AG",
+            country="CH",
+            is_pep=True,
+            annual_declared_income=1_800_000,
+        ),
     ]
 
 
@@ -158,4 +213,6 @@ def sample_accounts(customers: Iterable[Customer]) -> List[Account]:
         Account(id="acc-1", account_number="DE0012345678", customer_id=customers_list[0].id),
         Account(id="acc-2", account_number="DE0099999999", customer_id=customers_list[1].id),
         Account(id="acc-3", account_number="KY0012345678", customer_id=customers_list[2].id),
+        Account(id="acc-4", account_number="DE0088888888", customer_id=customers_list[3].id),
+        Account(id="acc-5", account_number="CH0011111111", customer_id=customers_list[4].id),
     ]

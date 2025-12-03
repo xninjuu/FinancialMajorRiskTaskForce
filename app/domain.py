@@ -56,6 +56,7 @@ class RiskIndicator:
 class EvaluatedIndicator:
     indicator: RiskIndicator
     is_hit: bool
+    explanation: str | None = None
 
     @property
     def score_contribution(self) -> float:

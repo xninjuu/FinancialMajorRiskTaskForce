@@ -128,6 +128,9 @@ public class RiskScoringEngine
   - Row 2–3: KPI-Kacheln (Total Tx, Alerts High/Medium, Offene Cases, High-Risk-Share, PEP-Hits). Farbcode per Status.
   - Row 4–6: Links Heatmap (Country x Domain), Mitte Alert-Timeline, Rechts Live-Transaktionsliste mit Score-Badge.
   - Drawer rechts: Transaction-Detail mit Hit-Liste (Axiom + Weight + Begründung) und Action-Bar (Open Case, Mark False Positive, Export CSV/PDF).
+- **Alert- & Case-Microcopy**: Jede Alert-Zeile zeigt max. zwei Axiom-Rationales (z.B. „AML_STRUCTURING – viele kleine Buchungen“) und Kontext (Kanal/Land) für schnellere Triagierung.
+- **Design-Dichte**: Zwei Dichte-Stufen (Comfort/Compact) mit 12/8 px Padding, konsistent via `SpacingScale` in ResourceDictionary, inkl. Tabellen und Flyouts.
+- **Insight Panels**: Rechtseitiges Insight-Panel fasst Score-Verlauf (Sparkline), Domain-Breakdown, Top-Axiome und Case-Historie zusammen; identische Struktur wie Konsolen-Dashboard.
 - **Transactions View**: Sticky Filterbar (Amount Range, Domain, Device/Channel, Country), Tabellenlayout mit Color Badge je Score-Level, Inline-Button „Score erklären“ öffnet Sidepanel mit angewendeten Axiomen.
 - **Cases View**: Kanban-ähnliche Spalten (Open/Investigating/Closed), Karten mit Case-ID, Kunde/Account, Alert-Count, letzte Aktivität, Quick-Actions (Assign, Close, Add Note).
 - **Settings**: Axiom-/Weight-Editor (DataGrid mit Slider je Weight, Toggle aktiv/inaktiv), API-Key-Management (News, Sanktionslisten), Export-Vorlagen.
@@ -162,11 +165,11 @@ public class RiskScoringEngine
 ## Near-Realtime Python-Simulation (Startpunkt)
 Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, liegt nun ein sofort ausführbarer Python-Prototyp bei, der alle Kernfunktionen simuliert:
 
-- Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Alltagsverkehr).
-- Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch und weiteren AML/Fraud/TF/Tax-Regeln.
-- Alert-Generierung, Case-Bündelung mit Auto-Eskalation (ab 3 Alerts → Investigating) und Domain-Breakdown.
+- Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Crypto-Mixer-Bursts, Refund-Carousels, Alltagsverkehr).
+- Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch sowie neuen Regeln für Cash-Intensität, strukturierten Kleinspenden (TF) und Offshore-Hopping (Tax).
+- Alert-Generierung, Case-Bündelung mit Auto-Eskalation (ab 3 Alerts → Investigating) und Domain-Breakdown samt kurzer Rationale pro Treffer.
 - News-Ticker mit rotierenden Headlines.
-- Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome).
+- Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome) plus Sektion „Letzte Alerts“ mit Indikator-Erklärungen.
 
 ### Quickstart
 1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
