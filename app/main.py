@@ -30,6 +30,7 @@ class RealTimeOrchestrator:
         self.recent_transactions: List[Transaction] = []
         self.alerts: Dict[str, Alert] = {}
         self.total_processed = 0
+        self.recent_scores: List[float] = []
 
     async def start(self) -> None:
         await asyncio.gather(
@@ -44,6 +45,8 @@ class RealTimeOrchestrator:
             score, evaluated = self.risk_engine.score_transaction(tx, history=self.recent_transactions)
             risk_level = self.risk_engine.thresholds.level(score)
             print(f"[TX] {tx.id} {tx.amount:.2f} {tx.currency} {tx.counterparty_country} via {tx.channel} -> Score {score:.1f} ({risk_level})")
+            self.recent_scores.append(score)
+            self.recent_scores = self.recent_scores[-200:]
             if risk_level == "High":
                 alert = Alert(
                     id=f"alert-{len(self.alerts)+1}",
@@ -75,6 +78,8 @@ class RealTimeOrchestrator:
         print(f"Verarbeitete Transaktionen: {self.total_processed}")
         print(f"Alerts gesamt: {high_risk} | Flags (Medium): {medium_flags}")
         print(f"Offene Cases: {len(open_cases)}")
+        self._print_case_statuses()
+        self._print_score_window()
         self._print_domain_breakdown()
         print("Top-Axiome (Hits):")
         top_indicators = self._aggregate_indicator_hits()
@@ -103,6 +108,26 @@ class RealTimeOrchestrator:
         print("Domain-Breakdown:")
         for domain, count in domain_counts.items():
             print(f"- {domain}: {count}")
+
+    def _print_case_statuses(self) -> None:
+        statuses: Dict[str, int] = {"Open": 0, "Investigating": 0, "Closed": 0}
+        for case in self.case_manager.summary():
+            statuses[case.status] = statuses.get(case.status, 0) + 1
+        print(
+            "Case-Status: "
+            + ", ".join([f"{status} {count}" for status, count in statuses.items() if count])
+        )
+
+    def _print_score_window(self) -> None:
+        if not self.recent_scores:
+            print("Scores: noch keine Daten")
+            return
+        latest = self.recent_scores[-1]
+        avg = sum(self.recent_scores) / len(self.recent_scores)
+        high_share = sum(1 for s in self.recent_scores if s >= self.risk_engine.thresholds.medium) / len(
+            self.recent_scores
+        )
+        print(f"Score-Fenster (200 TX): aktuell {latest:.1f}, Mittel {avg:.1f}, High-Share {high_share:.0%}")
 
 
 def main() -> None:

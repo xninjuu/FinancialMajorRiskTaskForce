@@ -120,6 +120,25 @@ public class RiskScoringEngine
 - Layout: Top News-Ticker, linke Navigation (Dashboard, Transactions, Alerts, Cases, Settings), zentrale KPIs, rechte Live-Transaktionsliste mit Farbcodes.
 - Kartenbasiertes Dashboard, Buttons "Open Case" / "Mark False Positive" in Transaction-Detail.
 
+### Ausführliches UI-Design (WPF/WinUI)
+- **Design-Tokens**: Primär #0E0E10, Sekundär #16161A, Akzent Rot #E50914, Success #0FBF61, Warn #F2A007, Error #F05454; Border-Radius 10px, Schatten dezent (Blur 12, Opacity 18%).
+- **Typografie**: Segoe UI/Inter 14pt normal; Headlines 22–28pt Semibold, Zahlen/KPIs 32pt Bold, Monospace (Cascadia) für Codes/IDs.
+- **Dashboard-Layout (Grid 12)**:
+  - Row 1: News-Ticker (scrollend), globale Filter (Zeitraum, Szenario-Profil, Domain-Toggles AML/Fraud/TF/Tax).
+  - Row 2–3: KPI-Kacheln (Total Tx, Alerts High/Medium, Offene Cases, High-Risk-Share, PEP-Hits). Farbcode per Status.
+  - Row 4–6: Links Heatmap (Country x Domain), Mitte Alert-Timeline, Rechts Live-Transaktionsliste mit Score-Badge.
+  - Drawer rechts: Transaction-Detail mit Hit-Liste (Axiom + Weight + Begründung) und Action-Bar (Open Case, Mark False Positive, Export CSV/PDF).
+- **Transactions View**: Sticky Filterbar (Amount Range, Domain, Device/Channel, Country), Tabellenlayout mit Color Badge je Score-Level, Inline-Button „Score erklären“ öffnet Sidepanel mit angewendeten Axiomen.
+- **Cases View**: Kanban-ähnliche Spalten (Open/Investigating/Closed), Karten mit Case-ID, Kunde/Account, Alert-Count, letzte Aktivität, Quick-Actions (Assign, Close, Add Note).
+- **Settings**: Axiom-/Weight-Editor (DataGrid mit Slider je Weight, Toggle aktiv/inaktiv), API-Key-Management (News, Sanktionslisten), Export-Vorlagen.
+- **Motion/States**: Hover-Farben leicht aufgehellt, Fokus-Ring 2px Rot, Toasts oben rechts für neue Alerts/Cases, Live-Badge blinkt dezent.
+- **Accessibility**: Farbkontrast > 4.5:1, Tastaturnavigation (Tab/Shift+Tab), ARIA-Live für News/Alerts in Web-Variante, „High Contrast“-Schalter.
+
+### Near-Realtime Console UI (Prototyp)
+- 200er Sliding-Window Statistik (aktueller Score, Mittelwert, High-Share) plus Case-Status-Breakdown.
+- Domain-Breakdown und Top-Axiome (Trefferzählung) werden in festen Abständen (alle 8 Transaktionen) ausgegeben.
+- News-Ticker rotiert Headlines; lässt sich in WPF via `ItemsControl` + `Storyboard` nachbilden.
+
 ## Reporting & Dashboards
 - KPIs nach Domain (AML/TF/Fraud/Tax), Risikolevel Low/Medium/High.
 - Heatmaps nach Kunde, Land, Produkt, Kanal.

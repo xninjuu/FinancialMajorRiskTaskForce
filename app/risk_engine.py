@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Tuple
@@ -55,6 +56,9 @@ class RiskScoringEngine:
     def _rule_aml_high_risk_country(self, tx: Transaction, _: List[Transaction]) -> bool:
         return tx.counterparty_country.upper() in {"IR", "KP", "AF", "CU", "SY"}
 
+    def _rule_aml_high_risk_sector(self, tx: Transaction, _: List[Transaction]) -> bool:
+        return tx.merchant_category in {"crypto", "luxury"}
+
     def _rule_aml_pep_high_value(self, tx: Transaction, _: List[Transaction]) -> bool:
         account = self.accounts.get(tx.account_id)
         customer = self.customers.get(account.customer_id) if account else None
@@ -77,6 +81,18 @@ class RiskScoringEngine:
         total_flow = sum(h.amount for h in relevant)
         return total_flow > customer.annual_declared_income / 6
 
+    def _rule_aml_repeated_offshore(self, tx: Transaction, history: List[Transaction]) -> bool:
+        offshore = {"PA", "KY", "VG", "MT"}
+        window_start = datetime.utcnow() - timedelta(hours=1)
+        relevant = [
+            h
+            for h in history
+            if h.account_id == tx.account_id
+            and h.counterparty_country.upper() in offshore
+            and h.timestamp >= window_start
+        ]
+        return tx.counterparty_country.upper() in offshore and len(relevant) >= 2 and tx.amount >= 5000
+
     def _rule_fraud_unusual_device_channel(self, tx: Transaction, _: List[Transaction]) -> bool:
         return tx.channel.lower() in {"unknown_device", "tor", "anonymous_proxy"}
 
@@ -85,8 +101,16 @@ class RiskScoringEngine:
         relevant = [h for h in history if h.account_id == tx.account_id and h.timestamp >= window_start]
         return len(relevant) >= 4 and sum(h.amount for h in relevant) > 20000
 
+    def _rule_fraud_device_channel_mix(self, tx: Transaction, history: List[Transaction]) -> bool:
+        window_start = datetime.utcnow() - timedelta(hours=2)
+        recent = [h.channel for h in history if h.account_id == tx.account_id and h.timestamp >= window_start]
+        return len(set(recent + [tx.channel])) >= 3
+
     def _rule_tf_conflict_region(self, tx: Transaction, _: List[Transaction]) -> bool:
         return tx.counterparty_country.upper() in {"RU", "UA", "IR", "SY"}
+
+    def _rule_tf_ngo_conflict_donation(self, tx: Transaction, _: List[Transaction]) -> bool:
+        return "donation" in (tx.purpose or "").lower() and tx.counterparty_country.upper() in {"SY", "IR", "AF", "UA"}
 
     def _rule_tax_low_tax_jurisdiction(self, tx: Transaction, _: List[Transaction]) -> bool:
         return tx.counterparty_country.upper() in {"PA", "KY", "VG", "MT"}
@@ -111,6 +135,12 @@ def default_indicators() -> List[RiskIndicator]:
             weight=15.0,
         ),
         RiskIndicator(
+            code="AML_HIGH_RISK_SECTOR",
+            description="Transaktion in Hochrisiko-Branche (z.B. Crypto, Luxus)",
+            domain=RiskDomain.MONEY_LAUNDERING,
+            weight=9.0,
+        ),
+        RiskIndicator(
             code="AML_PEP_HIGH_VALUE",
             description="PEP-Kunde mit hoher Transaktion",
             domain=RiskDomain.MONEY_LAUNDERING,
@@ -129,6 +159,12 @@ def default_indicators() -> List[RiskIndicator]:
             weight=16.0,
         ),
         RiskIndicator(
+            code="AML_REPEATED_OFFSHORE",
+            description="Mehrere Offshore-Zahlungen in kurzer Zeit",
+            domain=RiskDomain.MONEY_LAUNDERING,
+            weight=12.0,
+        ),
+        RiskIndicator(
             code="FRAUD_UNUSUAL_DEVICE_CHANNEL",
             description="Ungewohntes oder anonymes Gerät/Kanal",
             domain=RiskDomain.FRAUD,
@@ -141,10 +177,22 @@ def default_indicators() -> List[RiskIndicator]:
             weight=14.0,
         ),
         RiskIndicator(
+            code="FRAUD_DEVICE_CHANNEL_MIX",
+            description="Viele unterschiedliche Geräte/Kanäle in kurzer Zeit",
+            domain=RiskDomain.FRAUD,
+            weight=9.5,
+        ),
+        RiskIndicator(
             code="TF_CONFLICT_REGION",
             description="Zahlung in Konflikt-/TF-Risikoregion",
             domain=RiskDomain.TERRORIST_FINANCING,
             weight=12.5,
+        ),
+        RiskIndicator(
+            code="TF_NGO_CONFLICT_DONATION",
+            description="NGO-Spende in Konflikt- oder TF-Risikoregion",
+            domain=RiskDomain.TERRORIST_FINANCING,
+            weight=13.5,
         ),
         RiskIndicator(
             code="TAX_LOW_TAX_JURISDICTION",

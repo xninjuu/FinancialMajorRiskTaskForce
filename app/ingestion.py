@@ -19,6 +19,8 @@ class TransactionIngestionService:
                 self._scenario_structuring,
                 self._scenario_conflict_region,
                 self._scenario_high_income_spike,
+                self._scenario_conflict_donation,
+                self._scenario_luxury_pep_spree,
                 self._scenario_generic,
             ]
         )
@@ -94,6 +96,30 @@ class TransactionIngestionService:
             channel=random.choice(["mobile", "web", "branch"]),
             is_credit=random.choice([True, False]),
             purpose="Everyday payment",
+        )
+
+    def _scenario_conflict_donation(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(50, 4500), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["SY", "IR", "AF", "UA"]),
+            channel=random.choice(["mobile", "web"]),
+            is_credit=False,
+            purpose="NGO donation in conflict zone",
+        )
+
+    def _scenario_luxury_pep_spree(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(7500, 28000), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["AE", "US", "FR", "GB"]),
+            channel=random.choice(["mobile", "web", "unknown_device"]),
+            is_credit=False,
+            purpose="Luxury spend spree",
         )
 
 
