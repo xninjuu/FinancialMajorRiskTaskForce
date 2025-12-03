@@ -40,6 +40,8 @@ class Transaction:
     counterparty_country: str
     channel: str
     is_credit: bool
+    merchant_category: str | None = None
+    purpose: str | None = None
 
 
 @dataclass

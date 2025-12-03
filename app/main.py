@@ -16,12 +16,20 @@ class RealTimeOrchestrator:
     def __init__(self) -> None:
         self.customers = sample_customers()
         self.accounts = sample_accounts(self.customers)
+        self.customer_index = {c.id: c for c in self.customers}
+        self.account_index = {a.id: a for a in self.accounts}
         self.ingestion = TransactionIngestionService(self.customers, self.accounts)
-        self.risk_engine = RiskScoringEngine(default_indicators(), thresholds=RiskThresholds())
+        self.risk_engine = RiskScoringEngine(
+            default_indicators(),
+            thresholds=RiskThresholds(),
+            customers=self.customer_index,
+            accounts=self.account_index,
+        )
         self.case_manager = CaseManagementService()
         self.news_service = NewsService(sample_news())
         self.recent_transactions: List[Transaction] = []
         self.alerts: Dict[str, Alert] = {}
+        self.total_processed = 0
 
     async def start(self) -> None:
         await asyncio.gather(
@@ -50,7 +58,9 @@ class RealTimeOrchestrator:
             elif risk_level == "Medium":
                 print("  -> Flagged for review (Medium risk)")
 
-            if len(self.alerts) % 5 == 0 and self.alerts:
+            self.total_processed += 1
+
+            if self.total_processed % 8 == 0:
                 self._print_dashboard()
 
     async def _run_news_ticker(self) -> None:
@@ -60,9 +70,12 @@ class RealTimeOrchestrator:
     def _print_dashboard(self) -> None:
         open_cases = [c for c in self.case_manager.summary() if c.status != "Closed"]
         high_risk = len(self.alerts)
+        medium_flags = self.total_processed - high_risk
         print("\n==== Echtzeit-Dashboard ====")
-        print(f"Alerts gesamt: {high_risk}")
+        print(f"Verarbeitete Transaktionen: {self.total_processed}")
+        print(f"Alerts gesamt: {high_risk} | Flags (Medium): {medium_flags}")
         print(f"Offene Cases: {len(open_cases)}")
+        self._print_domain_breakdown()
         print("Top-Axiome (Hits):")
         top_indicators = self._aggregate_indicator_hits()
         for code, count in top_indicators.items():
@@ -76,6 +89,20 @@ class RealTimeOrchestrator:
                 if hit.is_hit:
                     counts[hit.indicator.code] = counts.get(hit.indicator.code, 0) + 1
         return counts
+
+    def _print_domain_breakdown(self) -> None:
+        domain_counts: Dict[str, int] = {}
+        for alert in self.alerts.values():
+            for hit in alert.evaluated_indicators:
+                if hit.is_hit:
+                    domain = hit.indicator.domain.name
+                    domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        if not domain_counts:
+            print("Domain-Breakdown: (noch keine Treffer)")
+            return
+        print("Domain-Breakdown:")
+        for domain, count in domain_counts.items():
+            print(f"- {domain}: {count}")
 
 
 def main() -> None:

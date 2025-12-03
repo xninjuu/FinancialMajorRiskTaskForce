@@ -143,11 +143,11 @@ public class RiskScoringEngine
 ## Near-Realtime Python-Simulation (Startpunkt)
 Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, liegt nun ein sofort ausführbarer Python-Prototyp bei, der alle Kernfunktionen simuliert:
 
-- Transaktions-Streaming mit Zufallsdaten (inkl. AML/TF/Fraud/Tax-Scenarios).
-- Regelbasierte Axiom-Engine mit Gewichtung, Normalisierung und Thresholds.
-- Alert-Generierung und Case-Bündelung.
+- Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Alltagsverkehr).
+- Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch und weiteren AML/Fraud/TF/Tax-Regeln.
+- Alert-Generierung, Case-Bündelung mit Auto-Eskalation (ab 3 Alerts → Investigating) und Domain-Breakdown.
 - News-Ticker mit rotierenden Headlines.
-- Konsolen-Dashboard, das in kurzen Abständen Kennzahlen ausgibt.
+- Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome).
 
 ### Quickstart
 1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
@@ -157,7 +157,7 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
    ```
 3) Abbruch jederzeit via `Ctrl+C`.
 
-Die Simulation erzeugt fortlaufend Transaktionen, berechnet Scores und druckt Alerts/Cases sowie einen News-Ticker auf die Konsole. Die Axiome/Indikatoren findest du in `app/risk_engine.py`, die Streams/Beispiele in `app/ingestion.py` und `app/news_service.py`.
+Die Simulation erzeugt fortlaufend Transaktionen, berechnet Scores und druckt Alerts/Cases sowie den News-Ticker auf die Konsole. Die Axiome/Indikatoren findest du in `app/risk_engine.py`, die Streams/Beispiele in `app/ingestion.py` und `app/news_service.py`. Das Konsolen-Dashboard wird alle acht Transaktionen aktualisiert und zeigt Domain-Breakdowns sowie Hit-Statistiken.
 
 ## Nächste Schritte
 - Dotnet-/WPF-Solution aufsetzen (wenn Zielsystem verfügbar ist) und Python-Prototyp-Logik in C# übertragen.
