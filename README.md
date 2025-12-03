@@ -140,8 +140,27 @@ public class RiskScoringEngine
 - **Option A (präferiert)**: .NET 8, C#, WPF/WinUI 3, EF Core, SQLite (lokal), später PostgreSQL/MSSQL.
 - **Option B**: Python + Qt/PySide + PyInstaller (mehr DS-Flexibilität, mehr UI-Aufwand).
 
+## Near-Realtime Python-Simulation (Startpunkt)
+Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, liegt nun ein sofort ausführbarer Python-Prototyp bei, der alle Kernfunktionen simuliert:
+
+- Transaktions-Streaming mit Zufallsdaten (inkl. AML/TF/Fraud/Tax-Scenarios).
+- Regelbasierte Axiom-Engine mit Gewichtung, Normalisierung und Thresholds.
+- Alert-Generierung und Case-Bündelung.
+- News-Ticker mit rotierenden Headlines.
+- Konsolen-Dashboard, das in kurzen Abständen Kennzahlen ausgibt.
+
+### Quickstart
+1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
+2) Start der Echtzeit-Simulation:
+   ```bash
+   python -m app.main
+   ```
+3) Abbruch jederzeit via `Ctrl+C`.
+
+Die Simulation erzeugt fortlaufend Transaktionen, berechnet Scores und druckt Alerts/Cases sowie einen News-Ticker auf die Konsole. Die Axiome/Indikatoren findest du in `app/risk_engine.py`, die Streams/Beispiele in `app/ingestion.py` und `app/news_service.py`.
+
 ## Nächste Schritte
-- Solution-Skelett erzeugen (`dotnet new wpf`), Layer-Struktur und Projekte aufsetzen.
+- Dotnet-/WPF-Solution aufsetzen (wenn Zielsystem verfügbar ist) und Python-Prototyp-Logik in C# übertragen.
 - Konfigurationstabellen für Risk Indicators/Axiome anlegen (Seeding via EF Core).
 - Mock-Stream oder File-Watcher für Transaktions-Ingestion implementieren.
 - Erste UI-Kacheln für KPIs, Live-Tabelle und Alert-Liste binden.
