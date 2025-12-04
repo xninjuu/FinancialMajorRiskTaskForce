@@ -172,10 +172,11 @@ public class RiskScoringEngine
 ## Near-Realtime Python-Simulation (Startpunkt)
 Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, liegt nun ein sofort ausführbarer Python-Prototyp bei, der alle Kernfunktionen simuliert:
 
-- Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Crypto-Mixer-Bursts, Refund-Carousels, Alltagsverkehr).
-- Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch sowie neuen Regeln für Cash-Intensität, strukturierten Kleinspenden (TF) und Offshore-Hopping (Tax).
-- Alert-Generierung, Case-Bündelung mit Auto-Eskalation (ab 3 Alerts → Investigating) und Domain-Breakdown samt kurzer Rationale pro Treffer.
-- News-Ticker mit rotierenden Headlines.
+- Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Crypto-Mixer-Bursts, Refund-Carousels, Aid-Corridor-Spendenstory, Alltagsverkehr).
+- Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch sowie neuen Regeln für Cash-Intensität, strukturierte Kleinspenden (TF), Aid-Corridor-Routen und Offshore-Hopping (Tax).
+- **Konfigurierbare Regeln**: `config/indicators.json` und `config/thresholds.json` können ohne Codeänderung angepasst werden; die Engine lädt Gewichte/Thresholds zur Laufzeit.
+- **Persistenz (SQLite)**: Alle Transaktionen, Alerts und Cases werden in `codex.db` abgelegt; die Historie pro Account wird für Structuring-/Velocity-Regeln verwendet.
+- **Mini-UI**: Ein schlanker, interner Web-View unter http://localhost:8000 listet Alerts; http://localhost:8000/cases zeigt Cases (read-only).
 - Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome) plus Sektion „Letzte Alerts“ mit Indikator-Erklärungen.
 - Login-/2FA-Pflicht: Sicherheits-Bootstrap erzeugt Nutzer + Passwort + 2FA-Code, versendet Welcome-Mail und erzwingt "Internal Only"-Modus, bevor Streaming und Risk Engine starten.
 
@@ -187,6 +188,8 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
    ```
 3) Abbruch jederzeit via `Ctrl+C`.
 
+Die Web-Ansicht ist read-only und lauscht auf Port 8000, solange der Prozess läuft.
+
 Die Simulation erzeugt fortlaufend Transaktionen, berechnet Scores und druckt Alerts/Cases sowie den News-Ticker auf die Konsole. Die Axiome/Indikatoren findest du in `app/risk_engine.py`, die Streams/Beispiele in `app/ingestion.py` und `app/news_service.py`. Das Konsolen-Dashboard wird alle acht Transaktionen aktualisiert und zeigt Domain-Breakdowns sowie Hit-Statistiken.
 
 ### Sicherheits-Bootstrap beobachten
@@ -194,6 +197,11 @@ Beim Start erscheinen im Terminal:
 - `[MAIL] ...` mit der Welcome-Mail inklusive generiertem Passwort und 2FA-Code (zur Demo-Ausgabe),
 - `[AUTH]` Meldungen für den Session-Aufbau und
 - `[ACCESS] Internal-only runtime verified` als Nachweis, dass interne Ressourcen geschützt sind.
+
+## AML-/TF-Storylines (Demo)
+- **Aid-Corridor (TF)**: NGO-ähnliche Kleinspenden (250–5.200 EUR) Richtung Konfliktregion (SY/IR/AF/UA) in 3h-Fenstern. Die Regel `TF_AID_CORRIDOR_STORY` kombiniert Purpose-Muster („Aid“, „Corridor“, „Relief“) mit Länderkorridor und Frequenz.
+- **Structuring & Cash-Intensität (AML)**: Mehrere Bargeldeinzahlungen <9.500 EUR in 30 Minuten plus 6h Cash-Intensitäts-Check (>=20k) greifen auf die persistierte Historie zurück und schlagen bei wiederholtem Verhalten alarm.
+- **Offshore-Hopping (Tax)**: Wiederholte Transfers >=7k in verschiedene Niedrigsteuer-Jurisdiktionen binnen 6h triggern das Tax-Profil.
 
 ## Nächste Schritte
 - Dotnet-/WPF-Solution aufsetzen (wenn Zielsystem verfügbar ist) und Python-Prototyp-Logik in C# übertragen.

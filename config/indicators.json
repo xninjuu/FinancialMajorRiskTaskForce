@@ -1,0 +1,110 @@
+[
+  {
+    "code": "AML_HIGH_RISK_COUNTRY",
+    "description": "Gegenpartei in Hochrisiko- oder sanktioniertem Land",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 15.0
+  },
+  {
+    "code": "AML_HIGH_RISK_SECTOR",
+    "description": "Transaktion in Hochrisiko-Branche (z.B. Crypto, Luxus)",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 10.0
+  },
+  {
+    "code": "AML_PEP_HIGH_VALUE",
+    "description": "PEP-Kunde mit hoher Transaktion",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 18.0
+  },
+  {
+    "code": "AML_STRUCTURING",
+    "description": "Viele kleine Transaktionen im 30-Minuten-Fenster",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 21.0
+  },
+  {
+    "code": "AML_AMOUNT_VS_INCOME",
+    "description": "Transaktionsvolumen überrollt Einkommen",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 16.0
+  },
+  {
+    "code": "AML_REPEATED_OFFSHORE",
+    "description": "Mehrere Offshore-Zahlungen in kurzer Zeit",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 12.0
+  },
+  {
+    "code": "AML_CASH_INTENSITY",
+    "description": "Hohe Cash-Intensität am Schalter",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 11.0
+  },
+  {
+    "code": "FRAUD_UNUSUAL_DEVICE_CHANNEL",
+    "description": "Ungewohntes oder anonymes Gerät/Kanal",
+    "domain": "FRAUD",
+    "weight": 10.0
+  },
+  {
+    "code": "FRAUD_VELOCITY_SPENDING",
+    "description": "Hohe Frequenz/Volumen in kurzer Zeit",
+    "domain": "FRAUD",
+    "weight": 14.0
+  },
+  {
+    "code": "FRAUD_DEVICE_CHANNEL_MIX",
+    "description": "Viele unterschiedliche Geräte/Kanäle in kurzer Zeit",
+    "domain": "FRAUD",
+    "weight": 9.5
+  },
+  {
+    "code": "FRAUD_REFUND_CAROUSEL",
+    "description": "Rückerstattungsmuster nach hohem Kredit",
+    "domain": "FRAUD",
+    "weight": 12.0
+  },
+  {
+    "code": "TF_CONFLICT_REGION",
+    "description": "Zahlung in Konflikt-/TF-Risikoregion",
+    "domain": "TERRORIST_FINANCING",
+    "weight": 12.5
+  },
+  {
+    "code": "TF_NGO_CONFLICT_DONATION",
+    "description": "NGO-Spende in Konflikt- oder TF-Risikoregion",
+    "domain": "TERRORIST_FINANCING",
+    "weight": 13.5
+  },
+  {
+    "code": "TF_STRUCTURED_SMALL_DONATIONS",
+    "description": "Viele Kleinspenden in kurzer Zeit",
+    "domain": "TERRORIST_FINANCING",
+    "weight": 9.0
+  },
+  {
+    "code": "TF_AID_CORRIDOR_STORY",
+    "description": "Serielle Hilfszahlungen an ein Konflikt-NGO-Korridorprofil",
+    "domain": "TERRORIST_FINANCING",
+    "weight": 14.5
+  },
+  {
+    "code": "TAX_LOW_TAX_JURISDICTION",
+    "description": "Zahlung in niedrigbesteuerndes Offshore-Territorium",
+    "domain": "TAX_EVASION",
+    "weight": 8.0
+  },
+  {
+    "code": "TAX_INCOME_MISMATCH",
+    "description": "Rollierender Cashflow übersteigt Einkommen signifikant",
+    "domain": "TAX_EVASION",
+    "weight": 13.0
+  },
+  {
+    "code": "TAX_OFFSHORE_HOPPING",
+    "description": "Mehrere Offshore-Jurisdiktionen binnen 6h",
+    "domain": "TAX_EVASION",
+    "weight": 10.5
+  }
+]

@@ -155,6 +155,23 @@ class RiskScoringEngine:
         hit = len(relevant) >= 4 and tx.amount <= 500
         return hit, "Viele Kleinspenden in 60 Minuten" if hit else None
 
+    def _rule_tf_aid_corridor_story(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        keywords = {"aid", "corridor", "ngo", "relief"}
+        purpose = (tx.purpose or "").lower()
+        if not any(k in purpose for k in keywords):
+            return False, None
+        window_start = datetime.utcnow() - timedelta(hours=3)
+        relevant = [
+            h
+            for h in history
+            if h.account_id == tx.account_id
+            and h.timestamp >= window_start
+            and any(k in (h.purpose or "").lower() for k in keywords)
+            and h.counterparty_country.upper() in {"SY", "IR", "AF", "UA"}
+        ]
+        hit = len(relevant) >= 3 and 200 <= tx.amount <= 5500
+        return hit, "Serielle Hilfszahlungen in Konfliktkorridor (3h)" if hit else None
+
     def _rule_tax_low_tax_jurisdiction(self, tx: Transaction, _: List[Transaction]) -> bool:
         hit = tx.counterparty_country.upper() in {"PA", "KY", "VG", "MT"}
         return hit, "Zahlung in Niedrigsteuer-Territorium" if hit else None
@@ -265,6 +282,12 @@ def default_indicators() -> List[RiskIndicator]:
             description="Viele Kleinspenden in kurzer Zeit",
             domain=RiskDomain.TERRORIST_FINANCING,
             weight=9.0,
+        ),
+        RiskIndicator(
+            code="TF_AID_CORRIDOR_STORY",
+            description="Serielle Hilfszahlungen in Konflikt-NGO-Korridor",
+            domain=RiskDomain.TERRORIST_FINANCING,
+            weight=14.5,
         ),
         RiskIndicator(
             code="TAX_LOW_TAX_JURISDICTION",

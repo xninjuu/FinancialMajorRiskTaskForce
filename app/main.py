@@ -3,14 +3,18 @@ from __future__ import annotations
 import asyncio
 import itertools
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List
 
-from .auth import AccessScope, SecurityBootstrap
+from .auth import SecurityBootstrap
 from .case_management import CaseManagementService
+from .config_loader import safe_load_indicators, safe_load_thresholds
 from .domain import Alert, Transaction
 from .ingestion import TransactionIngestionService, sample_accounts, sample_customers
 from .news_service import NewsService, sample_news
+from .persistence import PersistenceLayer
 from .risk_engine import RiskScoringEngine, RiskThresholds, default_indicators
+from .web import DashboardServer
 
 
 class RealTimeOrchestrator:
@@ -21,18 +25,22 @@ class RealTimeOrchestrator:
         self.registry = security.registry
         self.audit = security.audit
 
+        self.persistence = PersistenceLayer()
+
         self.customers = sample_customers()
         self.accounts = sample_accounts(self.customers)
         self.customer_index = {c.id: c for c in self.customers}
         self.account_index = {a.id: a for a in self.accounts}
         self.ingestion = TransactionIngestionService(self.customers, self.accounts)
+        indicator_config = safe_load_indicators(path=Path("config/indicators.json"), fallback=default_indicators())
+        thresholds = safe_load_thresholds(path=Path("config/thresholds.json"), fallback=RiskThresholds())
         self.risk_engine = RiskScoringEngine(
-            default_indicators(),
-            thresholds=RiskThresholds(),
+            indicator_config,
+            thresholds=thresholds,
             customers=self.customer_index,
             accounts=self.account_index,
         )
-        self.case_manager = CaseManagementService()
+        self.case_manager = CaseManagementService(persistence=self.persistence)
         self.news_service = NewsService(sample_news())
         self.recent_transactions: List[Transaction] = []
         self.alerts: Dict[str, Alert] = {}
@@ -41,9 +49,11 @@ class RealTimeOrchestrator:
         self.alert_history: List[Alert] = []
         self.medium_flags = 0
         self.session = session
+        self.dashboard_server = DashboardServer(self.persistence)
 
     async def start(self) -> None:
         self._guard_internal_access()
+        self.dashboard_server.start()
         await asyncio.gather(
             self._run_transactions(),
             self._run_news_ticker(),
@@ -53,9 +63,10 @@ class RealTimeOrchestrator:
         async for tx in self.ingestion.stream_transactions(delay_seconds=1.0):
             self.session_manager.ensure_active_session()
             self.registry.require(self.session, "realtime_stream")
-            self.recent_transactions.append(tx)
-            self.recent_transactions = self.recent_transactions[-200:]
-            score, evaluated = self.risk_engine.score_transaction(tx, history=self.recent_transactions)
+            self.persistence.record_transaction(tx)
+            history = self.persistence.recent_transactions(tx.account_id, window=timedelta(hours=6))
+            self.recent_transactions = (self.recent_transactions + [tx])[-200:]
+            score, evaluated = self.risk_engine.score_transaction(tx, history=history)
             self.registry.require(self.session, "risk_engine")
             risk_level = self.risk_engine.thresholds.level(score)
             print(f"[TX] {tx.id} {tx.amount:.2f} {tx.currency} {tx.counterparty_country} via {tx.channel} -> Score {score:.1f} ({risk_level})")
@@ -73,7 +84,9 @@ class RealTimeOrchestrator:
                 self.alert_history.append(alert)
                 self.alert_history = self.alert_history[-10:]
                 case = self.case_manager.attach_alert(alert)
+                alert.case_id = case.id
                 self.registry.require(self.session, "case_management")
+                self.persistence.record_alert(alert, risk_level)
                 print(f"  -> ALERT {alert.id} assigned to {case.id} ({len(case.alerts)} alerts)")
             elif risk_level == "Medium":
                 print("  -> Flagged for review (Medium risk)")

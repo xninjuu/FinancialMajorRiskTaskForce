@@ -22,8 +22,10 @@ class TransactionIngestionService:
                 self._scenario_crypto_mixer_burst,
                 self._scenario_refund_carousel,
                 self._scenario_conflict_donation,
+                self._scenario_aid_corridor_story,
                 self._scenario_luxury_pep_spree,
                 self._scenario_offshore_hopping,
+                self._scenario_everyday_business,
                 self._scenario_generic,
             ]
         )
@@ -113,6 +115,18 @@ class TransactionIngestionService:
             purpose="NGO donation in conflict zone",
         )
 
+    def _scenario_aid_corridor_story(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(250, 5200), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["SY", "IR", "AF", "UA"]),
+            channel=random.choice(["mobile", "web", "tor"]),
+            is_credit=False,
+            purpose="Aid corridor relief transfer",
+        )
+
     def _scenario_luxury_pep_spree(self) -> Transaction:
         account = random.choice(self.accounts)
         amount = round(random.uniform(7500, 28000), 2)
@@ -159,6 +173,18 @@ class TransactionIngestionService:
             channel=random.choice(["web", "mobile", "unknown_device"]),
             is_credit=False,
             purpose="Offshore routing",
+        )
+
+    def _scenario_everyday_business(self) -> Transaction:
+        account = random.choice(self.accounts)
+        amount = round(random.uniform(1200, 9500), 2)
+        return self._base_transaction(
+            account,
+            amount=amount,
+            counterparty_country=random.choice(["DE", "FR", "GB", "NL", "US"]),
+            channel=random.choice(["web", "mobile", "branch"]),
+            is_credit=random.choice([True, False]),
+            purpose="Payroll or invoice settlement",
         )
 
 
