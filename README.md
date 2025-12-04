@@ -202,7 +202,9 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
    Optionale Umgebungsvariablen:
    - `CODEX_DB_PATH` (Standard `codex.db`)
    - `CODEX_DASHBOARD_PORT` (Standard `8000`)
-   - `CODEX_DASHBOARD_USER` / `CODEX_DASHBOARD_PASSWORD` für das Web-Dashboard
+   - `CODEX_DASHBOARD_USER` (Standard `codex_internal`)
+   - `CODEX_DASHBOARD_PASSWORD_HASH` (SHA256, Standard `f0e6d40e24da418d26dc3a542354a32403f56ac3c86730c6815e4506c5d89e51`)
+   - `CODEX_DASHBOARD_PASSWORD` (überschreibt Hash und nutzt Klartext nur lokal, falls gesetzt)
 3) Abbruch jederzeit via `Ctrl+C`.
 4) Tests: `python -m pytest`
 
@@ -217,6 +219,13 @@ python -m app.main
 # Dashboard (Basic Auth): http://localhost:8000/alerts
 # Cases: http://localhost:8000/cases
 ```
+
+**Demo-Login (Basic Auth, persistent default)**
+- User: `codex_internal`
+- Password: `FMR-TaskForce!2024$Codex`
+- SHA256-Hash (für `.env`): `f0e6d40e24da418d26dc3a542354a32403f56ac3c86730c6815e4506c5d89e51`
+  - Setze `CODEX_DASHBOARD_USER` und `CODEX_DASHBOARD_PASSWORD_HASH` (oder alternativ `CODEX_DASHBOARD_PASSWORD` für reine lokale Tests).
+  - Der Hash wird serverseitig geprüft, sodass das Klartext-Passwort nicht im Prozess verbleibt, sofern `CODEX_DASHBOARD_PASSWORD` **nicht** gesetzt ist.
 
 ### Demo-Flow (Story)
 - **Problemstellung**: Near-Realtime AML/TF/Fraud/Tax-Risikoerkennung mit Case-Management-Light.

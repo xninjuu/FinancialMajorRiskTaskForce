@@ -54,9 +54,21 @@ class RealTimeOrchestrator:
         self.medium_flags = 0
         self.session = session
         dashboard_port = int(os.getenv("CODEX_DASHBOARD_PORT", "8000"))
-        dash_user = os.getenv("CODEX_DASHBOARD_USER", "analyst")
-        dash_pass = os.getenv("CODEX_DASHBOARD_PASSWORD", "analyst")
-        self.dashboard_server = DashboardServer(self.persistence, user=dash_user, password=dash_pass, port=dashboard_port)
+        dash_user = os.getenv("CODEX_DASHBOARD_USER", "codex_internal")
+        dash_pass = os.getenv("CODEX_DASHBOARD_PASSWORD")
+        dash_pass_hash = os.getenv(
+            "CODEX_DASHBOARD_PASSWORD_HASH",
+            "f0e6d40e24da418d26dc3a542354a32403f56ac3c86730c6815e4506c5d89e51",
+        )
+        if dash_pass:
+            dash_pass_hash = None
+        self.dashboard_server = DashboardServer(
+            self.persistence,
+            user=dash_user,
+            password=dash_pass,
+            password_hash=dash_pass_hash,
+            port=dashboard_port,
+        )
 
     async def start(self) -> None:
         self._guard_internal_access()

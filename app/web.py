@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import threading
 from datetime import datetime
@@ -39,6 +40,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     persistence: PersistenceLayer | None = None
     user: str = "analyst"
     password: str = "analyst"
+    password_hash: str | None = None
 
     def _write(self, status: int, content: str) -> None:
         body = content.encode("utf-8")
@@ -65,7 +67,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._unauthorized()
             return False
         username, _, password = decoded.partition(":")
-        if username != self.user or password != self.password:
+        if username != self.user:
+            self._unauthorized()
+            return False
+        if self.password_hash:
+            computed = base64.b16encode(hashlib.sha256(password.encode("utf-8")).digest()).decode("ascii").lower()
+            if computed != self.password_hash:
+                self._unauthorized()
+                return False
+            return True
+        if password != self.password:
             self._unauthorized()
             return False
         return True
@@ -159,10 +170,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 class DashboardServer:
-    def __init__(self, persistence: PersistenceLayer, host: str = "0.0.0.0", port: int = 8000, user: str = "analyst", password: str = "analyst") -> None:
+    def __init__(
+        self,
+        persistence: PersistenceLayer,
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        user: str = "analyst",
+        password: str | None = "analyst",
+        password_hash: str | None = None,
+    ) -> None:
         DashboardHandler.persistence = persistence
         DashboardHandler.user = user
-        DashboardHandler.password = password
+        DashboardHandler.password = password or ""
+        DashboardHandler.password_hash = password_hash
         self.server = HTTPServer((host, port), DashboardHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
