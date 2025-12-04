@@ -147,6 +147,7 @@ public class RiskScoringEngine
 - Bei Start wird ein Operator (`operator@fmr-taskforce.local`) registriert, ein sicheres Passwort generiert, ein 6-stelliger 2FA-Code ausgegeben und eine Welcome-Mail in der Konsole protokolliert.
 - Der Login erfolgt nur bei gültigem Passwort **und** korrektem 2FA-Code; andernfalls schlägt der Session-Aufbau fehl.
 - `AccessScope` markiert Objekte/Services als `PUBLIC` oder `INTERNAL_ONLY` und schützt die Echtzeit-Funktionen.
+- **Pflichtsicherungen**: Account-Lockout nach 5 Fehlversuchen (5 Minuten Sperre), 15-Minuten-Session-TTL mit erzwungenem Re-Login, Audit-Log für alle Auth-/Access-Ereignisse, Ressourcenkatalog (Realtimestream, Risk Engine, Case Management) mit Internal-Only-Gate; News-Ticker bleibt Public.
 
 ## Reporting & Dashboards
 - KPIs nach Domain (AML/TF/Fraud/Tax), Risikolevel Low/Medium/High.

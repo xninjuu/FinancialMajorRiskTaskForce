@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 from .auth import AccessScope, SecurityBootstrap
@@ -17,6 +17,9 @@ class RealTimeOrchestrator:
     def __init__(self) -> None:
         security = SecurityBootstrap()
         session = security.provision_internal_operator()
+        self.session_manager = security.session_manager
+        self.registry = security.registry
+        self.audit = security.audit
 
         self.customers = sample_customers()
         self.accounts = sample_accounts(self.customers)
@@ -38,7 +41,6 @@ class RealTimeOrchestrator:
         self.alert_history: List[Alert] = []
         self.medium_flags = 0
         self.session = session
-        self.security_summary = security.summary()
 
     async def start(self) -> None:
         self._guard_internal_access()
@@ -49,9 +51,12 @@ class RealTimeOrchestrator:
 
     async def _run_transactions(self) -> None:
         async for tx in self.ingestion.stream_transactions(delay_seconds=1.0):
+            self.session_manager.ensure_active_session()
+            self.registry.require(self.session, "realtime_stream")
             self.recent_transactions.append(tx)
             self.recent_transactions = self.recent_transactions[-200:]
             score, evaluated = self.risk_engine.score_transaction(tx, history=self.recent_transactions)
+            self.registry.require(self.session, "risk_engine")
             risk_level = self.risk_engine.thresholds.level(score)
             print(f"[TX] {tx.id} {tx.amount:.2f} {tx.currency} {tx.counterparty_country} via {tx.channel} -> Score {score:.1f} ({risk_level})")
             self.recent_scores.append(score)
@@ -68,6 +73,7 @@ class RealTimeOrchestrator:
                 self.alert_history.append(alert)
                 self.alert_history = self.alert_history[-10:]
                 case = self.case_manager.attach_alert(alert)
+                self.registry.require(self.session, "case_management")
                 print(f"  -> ALERT {alert.id} assigned to {case.id} ({len(case.alerts)} alerts)")
             elif risk_level == "Medium":
                 print("  -> Flagged for review (Medium risk)")
@@ -80,6 +86,7 @@ class RealTimeOrchestrator:
 
     async def _run_news_ticker(self) -> None:
         async for news in self.news_service.stream_news(delay_seconds=5.0):
+            self.registry.require(self.session, "news_feed")
             print(f"[NEWS] {news.title} ({news.source})")
 
     def _print_dashboard(self) -> None:
@@ -93,6 +100,10 @@ class RealTimeOrchestrator:
             "Access Policy: INTERNAL ONLY | angemeldet als "
             f"{self.session.user.email} ({self.session.user.role})"
         )
+        print(
+            f"Security: Session TTL active (expires in {self._session_seconds_remaining()}s); "
+            f"Audit events: {len(self.audit.events)}"
+        )
         self._print_case_statuses()
         self._print_score_window()
         self._print_domain_breakdown()
@@ -104,9 +115,14 @@ class RealTimeOrchestrator:
         print("==========================\n")
 
     def _guard_internal_access(self) -> None:
-        if self.session.user.access_scope != AccessScope.INTERNAL_ONLY:
-            raise PermissionError("Realtime functions require internal access")
+        self.session_manager.require_internal_access()
         print("[ACCESS] Internal-only runtime verified.")
+
+    def _session_seconds_remaining(self) -> int:
+        session = self.session_manager.ensure_active_session()
+        expires_at = session.issued_at + timedelta(seconds=session.ttl_seconds)
+        delta = expires_at - datetime.utcnow()
+        return max(0, int(delta.total_seconds()))
 
     def _aggregate_indicator_hits(self) -> Dict[str, int]:
         counts: Dict[str, int] = {}
