@@ -1,4 +1,3 @@
-"""Factories for deterministic scenario data used in tests and demos."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta

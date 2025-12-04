@@ -274,3 +274,29 @@ Beim Start erscheinen im Terminal:
 - Konfigurationstabellen für Risk Indicators/Axiome anlegen (Seeding via EF Core).
 - Mock-Stream oder File-Watcher für Transaktions-Ingestion implementieren.
 - Erste UI-Kacheln für KPIs, Live-Tabelle und Alert-Liste binden.
+
+## Desktop GUI (PySide6) build and run
+1. Install dependencies inside your activated `.venv` (PowerShell):
+   ```powershell
+   pip install -U pip
+   pip install pyside6 pyinstaller bcrypt python-dotenv
+   ```
+2. Build the single-file GUI executable:
+   ```powershell
+   pyinstaller FMR_TaskForce_GUI.spec
+   ```
+   The build bundles `config/indicators.json` and `config/thresholds.json` and excludes web server components.
+3. Launch on Windows (double-click or via shell):
+   ```powershell
+   .\start.bat
+   ```
+4. First-run admin bootstrap:
+   - Provide `CODEX_ADMIN_PASSWORD` in the environment to set the initial admin password securely.
+   - If absent, a random admin password is generated at startup and printed to the console; store it securely.
+5. UI workflow:
+   - Login dialog gates access (RBAC roles: ANALYST, LEAD, ADMIN).
+   - Dashboard, Alerts, Cases, Customers, Audit, and Settings tabs are available once authenticated.
+   - Inactivity auto-lock defaults to 15 minutes; use the login dialog to unlock.
+6. Packaging note:
+   - The GUI runs offline and does not start any FastAPI/Uvicorn server.
+   - For troubleshooting, keep the console window (PyInstaller `console=True`) to view errors instead of silent exits.

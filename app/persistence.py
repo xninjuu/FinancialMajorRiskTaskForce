@@ -11,7 +11,7 @@ from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
