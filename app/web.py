@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Tuple
+from urllib.parse import parse_qs, urlparse
 
 from .persistence import PersistenceLayer
 
@@ -35,6 +37,8 @@ HTML_FOOT = "</body></html>"
 
 class DashboardHandler(BaseHTTPRequestHandler):
     persistence: PersistenceLayer | None = None
+    user: str = "analyst"
+    password: str = "analyst"
 
     def _write(self, status: int, content: str) -> None:
         body = content.encode("utf-8")
@@ -44,9 +48,44 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _unauthorized(self) -> None:
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="codex"')
+        self.end_headers()
+
+    def _require_auth(self) -> bool:
+        header = self.headers.get("Authorization")
+        if not header or not header.startswith("Basic "):
+            self._unauthorized()
+            return False
+        encoded = header.split(" ", 1)[1]
+        try:
+            decoded = base64.b64decode(encoded).decode("utf-8")
+        except Exception:
+            self._unauthorized()
+            return False
+        username, _, password = decoded.partition(":")
+        if username != self.user or password != self.password:
+            self._unauthorized()
+            return False
+        return True
+
     def _render_alerts(self) -> str:
-        rows = [] if not self.persistence else self.persistence.list_alerts(limit=50)
+        if not self.persistence:
+            return "".join([HTML_HEAD, "<p>Keine Datenquelle.</p>", HTML_FOOT])
+        query = parse_qs(urlparse(self.path).query)
+        domain = query.get("domain", [None])[0]
+        status = query.get("status", [None])[0]
+        min_score = float(query.get("min_score", [0])[0]) if "min_score" in query else None
+        since = None
+        if "since" in query:
+            try:
+                since = datetime.fromisoformat(query["since"][0])
+            except ValueError:
+                since = None
+        rows = self.persistence.list_alerts(limit=50, domain=domain, status=status, min_score=min_score, since=since)
         content = [HTML_HEAD]
+        content.append("<p class='muted'>Filter: domain, status, min_score, since=ISO8601</p>")
         for row in rows:
             risk_level = row["risk_level"].lower()
             pill_class = "high" if risk_level == "high" else "medium" if risk_level == "medium" else "low"
@@ -69,15 +108,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return "".join(content)
 
     def _render_cases(self) -> str:
-        rows = [] if not self.persistence else self.persistence.list_cases()
+        if not self.persistence:
+            return "".join([HTML_HEAD, "<p>Keine Datenquelle.</p>", HTML_FOOT])
+        query = parse_qs(urlparse(self.path).query)
+        status = query.get("status", [None])[0]
+        rows = self.persistence.list_cases(status=status)
         content = [HTML_HEAD.replace("Realtime Alerts", "Cases")]
         for row in rows:
+            case_id = row["id"]
+            notes = self.persistence.case_notes(case_id)
+            alerts = self.persistence.alerts_for_case(case_id)
             content.append(
                 f"<div class='card'><div class='stack'><span class='pill medium'>{row['status']}</span>"
-                f"<strong>{row['id']}</strong></div>"
-                f"<div class='muted'>Created {row['created_at']} | Updated {row['updated_at']}</div>"
-                f"</div>"
+                f"<strong>{case_id}</strong> – Priority {row['priority'] or 'Normal'}</div>"
+                f"<div class='muted'>Created {row['created_at']} | Updated {row['updated_at']} | Label {row['label'] or 'n/a'}</div>"
+                f"<div class='muted'>Alerts: {len(alerts)}</div>"
             )
+            if alerts:
+                content.append("<ul>")
+                for alert in alerts:
+                    content.append(
+                        f"<li>{alert['id']} – Score {alert['score']:.1f} – {alert['risk_level']} ({alert['domain']})</li>"
+                    )
+                content.append("</ul>")
+            if notes:
+                content.append("<div class='muted'>Notes:</div><ul>")
+                for note in notes:
+                    content.append(
+                        f"<li>{note.created_at.isoformat()} {note.author}: {note.message}</li>"
+                    )
+                content.append("</ul>")
+            content.append("</div>")
         if not rows:
             content.append("<p class='card'>Keine Cases vorhanden.</p>")
         content.append(HTML_FOOT)
@@ -89,6 +150,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"ok")
             return
+        if not self._require_auth():
+            return
         if self.path.startswith("/cases"):
             self._write(200, self._render_cases())
             return
@@ -96,8 +159,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 class DashboardServer:
-    def __init__(self, persistence: PersistenceLayer, host: str = "0.0.0.0", port: int = 8000) -> None:
+    def __init__(self, persistence: PersistenceLayer, host: str = "0.0.0.0", port: int = 8000, user: str = "analyst", password: str = "analyst") -> None:
         DashboardHandler.persistence = persistence
+        DashboardHandler.user = user
+        DashboardHandler.password = password
         self.server = HTTPServer((host, port), DashboardHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 

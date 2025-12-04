@@ -28,6 +28,7 @@ class Account:
     id: str
     account_number: str
     customer_id: str
+    device_fingerprint: str | None = None
 
 
 @dataclass
@@ -42,6 +43,8 @@ class Transaction:
     is_credit: bool
     merchant_category: str | None = None
     purpose: str | None = None
+    device_id: str | None = None
+    card_present: bool | None = None
 
 
 @dataclass
@@ -72,19 +75,48 @@ class Alert:
     created_at: datetime
     status: str = "Open"
     case_id: Optional[str] = None
+    priority: str = "Normal"
+
+
+class CaseStatus(Enum):
+    OPEN = auto()
+    IN_REVIEW = auto()
+    ESCALATED = auto()
+    CLOSED = auto()
+
+
+class CaseLabel(Enum):
+    SAR_FILED = auto()
+    NO_SAR = auto()
+    FALSE_POSITIVE = auto()
+    MONITOR = auto()
+
+
+@dataclass
+class CaseNote:
+    author: str
+    message: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
 
 
 @dataclass
 class Case:
     id: str
     alerts: List[Alert] = field(default_factory=list)
-    status: str = "Open"
+    status: CaseStatus = CaseStatus.OPEN
+    label: CaseLabel | None = None
+    priority: str = "Normal"
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+    notes: List[CaseNote] = field(default_factory=list)
 
     def add_alert(self, alert: Alert) -> None:
         self.alerts.append(alert)
         alert.case_id = self.id
+        self.updated_at = datetime.utcnow()
+
+    def add_note(self, note: CaseNote) -> None:
+        self.notes.append(note)
         self.updated_at = datetime.utcnow()
 
     @property

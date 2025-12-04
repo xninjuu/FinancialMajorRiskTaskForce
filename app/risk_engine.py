@@ -44,8 +44,17 @@ class RiskScoringEngine:
             evaluated.append(EvaluatedIndicator(indicator=indicator, is_hit=hit, explanation=explanation))
 
         raw_score = sum(e.score_contribution for e in evaluated)
+        raw_score += self._correlation_bonus(evaluated)
         normalized_score = 100.0 / (1.0 + math.exp(-0.1 * (raw_score - 10)))
         return normalized_score, evaluated
+
+    def _correlation_bonus(self, evaluated: List[EvaluatedIndicator]) -> float:
+        hits = [e for e in evaluated if e.is_hit]
+        if len(hits) >= 3:
+            return 5.0
+        if len(hits) == 2 and any(e.indicator.domain == RiskDomain.TERRORIST_FINANCING for e in hits):
+            return 3.0
+        return 0.0
 
     def _evaluate_indicator(self, indicator: RiskIndicator, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
         evaluator = getattr(self, f"_rule_{indicator.code.lower()}", None)
@@ -89,6 +98,41 @@ class RiskScoringEngine:
         hit = total_flow > customer.annual_declared_income / 6
         return hit, "4h Cashflow übersteigt Einkommen / 6" if hit else None
 
+    def _rule_aml_pep_mismatch(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        account = self.accounts.get(tx.account_id)
+        customer = self.customers.get(account.customer_id) if account else None
+        if not customer or not customer.is_pep:
+            return False, None
+        last_day = datetime.utcnow() - timedelta(hours=24)
+        high_risk_countries = {"IR", "SY", "RU", "UA", "KP"}
+        risky = [
+            h
+            for h in history
+            if h.timestamp >= last_day and (h.counterparty_country.upper() in high_risk_countries or h.channel == "tor")
+        ]
+        hit = len(risky) >= 2 and tx.amount >= 4000
+        return hit, "PEP mit Mehrfach-Exposure zu Hochrisiko-Ländern" if hit else None
+
+    def _rule_aml_pep_offshore_layering(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        account = self.accounts.get(tx.account_id)
+        customer = self.customers.get(account.customer_id) if account else None
+        offshore = {"PA", "KY", "VG", "MT", "IM"}
+        if not customer or not customer.is_pep:
+            return False, None
+        window_start = datetime.utcnow() - timedelta(hours=12)
+        offshore_hits = [
+            h for h in history if h.timestamp >= window_start and h.counterparty_country.upper() in offshore
+        ]
+        hit = tx.counterparty_country.upper() in offshore and len(offshore_hits) >= 2
+        return hit, "PEP mit gestapelten Offshore-Transfers" if hit else None
+
+    def _rule_aml_round_tripping(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        window_start = datetime.utcnow() - timedelta(hours=6)
+        relevant = [h for h in history if h.timestamp >= window_start and h.account_id == tx.account_id]
+        matching = [h for h in relevant if abs(h.amount - tx.amount) <= max(200, tx.amount * 0.05)]
+        hit = len(matching) >= 3 and any(h.is_credit != tx.is_credit for h in matching)
+        return hit, "Rundlauf-Transaktionen mit ähnlichen Beträgen" if hit else None
+
     def _rule_aml_repeated_offshore(self, tx: Transaction, history: List[Transaction]) -> bool:
         offshore = {"PA", "KY", "VG", "MT"}
         window_start = datetime.utcnow() - timedelta(hours=1)
@@ -126,6 +170,30 @@ class RiskScoringEngine:
         recent = [h.channel for h in history if h.account_id == tx.account_id and h.timestamp >= window_start]
         hit = len(set(recent + [tx.channel])) >= 3
         return hit, "Stark wechselnde Geräte/Kanäle" if hit else None
+
+    def _rule_fraud_device_mismatch(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        account = self.accounts.get(tx.account_id)
+        trusted_device = account.device_fingerprint if account else None
+        if not trusted_device or not tx.device_id:
+            return False, None
+        window_start = datetime.utcnow() - timedelta(hours=4)
+        recent_devices = {h.device_id for h in history if h.timestamp >= window_start and h.account_id == tx.account_id}
+        hit = tx.device_id not in {trusted_device} and len(recent_devices) >= 2
+        return hit, "Device-Fingerprint wechselt unerwartet" if hit else None
+
+    def _rule_fraud_card_not_present(self, tx: Transaction, _: List[Transaction]) -> tuple[bool, str | None]:
+        if tx.card_present is None:
+            return False, None
+        hit = not tx.card_present and tx.amount >= 2000 and tx.channel in {"web", "mobile"}
+        return hit, "Card-Not-Present Hochwert-Transaktion" if hit else None
+
+    def _rule_fraud_velocity_cnp(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
+        if tx.card_present:
+            return False, None
+        window_start = datetime.utcnow() - timedelta(minutes=15)
+        relevant = [h for h in history if h.account_id == tx.account_id and h.timestamp >= window_start and not h.card_present]
+        hit = len(relevant) >= 3 and sum(h.amount for h in relevant) > 8000
+        return hit, "CNP-Velocity > 8k in 15 Minuten" if hit else None
 
     def _rule_fraud_refund_carousel(self, tx: Transaction, history: List[Transaction]) -> tuple[bool, str | None]:
         if tx.is_credit:
@@ -171,6 +239,11 @@ class RiskScoringEngine:
         ]
         hit = len(relevant) >= 3 and 200 <= tx.amount <= 5500
         return hit, "Serielle Hilfszahlungen in Konfliktkorridor (3h)" if hit else None
+
+    def _rule_tf_dual_use_goods(self, tx: Transaction, _: List[Transaction]) -> tuple[bool, str | None]:
+        dual_use_categories = {"electronics", "dual_use", "chemicals"}
+        hit = tx.merchant_category in dual_use_categories and tx.counterparty_country.upper() in {"IR", "SY", "KP"}
+        return hit, "Dual-Use-Güter mit Konflikt-/Sanktionsbezug" if hit else None
 
     def _rule_tax_low_tax_jurisdiction(self, tx: Transaction, _: List[Transaction]) -> bool:
         hit = tx.counterparty_country.upper() in {"PA", "KY", "VG", "MT"}
@@ -230,6 +303,18 @@ def default_indicators() -> List[RiskIndicator]:
             weight=16.0,
         ),
         RiskIndicator(
+            code="AML_PEP_MISMATCH",
+            description="PEP mit mehrfachen Hochrisiko-Exposures",
+            domain=RiskDomain.MONEY_LAUNDERING,
+            weight=14.0,
+        ),
+        RiskIndicator(
+            code="AML_PEP_OFFSHORE_LAYERING",
+            description="PEP mit gestapelten Offshore-Transfers",
+            domain=RiskDomain.MONEY_LAUNDERING,
+            weight=16.0,
+        ),
+        RiskIndicator(
             code="AML_REPEATED_OFFSHORE",
             description="Mehrere Offshore-Zahlungen in kurzer Zeit",
             domain=RiskDomain.MONEY_LAUNDERING,
@@ -240,6 +325,12 @@ def default_indicators() -> List[RiskIndicator]:
             description="Hohe Cash-Intensität am Schalter",
             domain=RiskDomain.MONEY_LAUNDERING,
             weight=11.0,
+        ),
+        RiskIndicator(
+            code="AML_ROUND_TRIPPING",
+            description="Rundlauf-Transaktionen mit ähnlichen Beträgen",
+            domain=RiskDomain.MONEY_LAUNDERING,
+            weight=13.0,
         ),
         RiskIndicator(
             code="FRAUD_UNUSUAL_DEVICE_CHANNEL",
@@ -258,6 +349,24 @@ def default_indicators() -> List[RiskIndicator]:
             description="Viele unterschiedliche Geräte/Kanäle in kurzer Zeit",
             domain=RiskDomain.FRAUD,
             weight=9.5,
+        ),
+        RiskIndicator(
+            code="FRAUD_DEVICE_MISMATCH",
+            description="Device-Fingerprint wechselt unerwartet",
+            domain=RiskDomain.FRAUD,
+            weight=11.0,
+        ),
+        RiskIndicator(
+            code="FRAUD_CARD_NOT_PRESENT",
+            description="Hochwertige Card-Not-Present-Buchung",
+            domain=RiskDomain.FRAUD,
+            weight=12.0,
+        ),
+        RiskIndicator(
+            code="FRAUD_VELOCITY_CNP",
+            description="CNP-Velocity in kurzer Zeit",
+            domain=RiskDomain.FRAUD,
+            weight=10.0,
         ),
         RiskIndicator(
             code="FRAUD_REFUND_CAROUSEL",
@@ -288,6 +397,12 @@ def default_indicators() -> List[RiskIndicator]:
             description="Serielle Hilfszahlungen in Konflikt-NGO-Korridor",
             domain=RiskDomain.TERRORIST_FINANCING,
             weight=14.5,
+        ),
+        RiskIndicator(
+            code="TF_DUAL_USE_GOODS",
+            description="Dual-Use-Güter mit Konflikt-/Sanktionsbezug",
+            domain=RiskDomain.TERRORIST_FINANCING,
+            weight=10.5,
         ),
         RiskIndicator(
             code="TAX_LOW_TAX_JURISDICTION",

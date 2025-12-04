@@ -30,6 +30,18 @@
     "weight": 16.0
   },
   {
+    "code": "AML_PEP_MISMATCH",
+    "description": "PEP mit mehrfachen Hochrisiko-Exposures",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 14.0
+  },
+  {
+    "code": "AML_PEP_OFFSHORE_LAYERING",
+    "description": "PEP mit gestapelten Offshore-Transfers",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 16.0
+  },
+  {
     "code": "AML_REPEATED_OFFSHORE",
     "description": "Mehrere Offshore-Zahlungen in kurzer Zeit",
     "domain": "MONEY_LAUNDERING",
@@ -40,6 +52,12 @@
     "description": "Hohe Cash-Intensität am Schalter",
     "domain": "MONEY_LAUNDERING",
     "weight": 11.0
+  },
+  {
+    "code": "AML_ROUND_TRIPPING",
+    "description": "Rundlauf-Transaktionen mit ähnlichen Beträgen",
+    "domain": "MONEY_LAUNDERING",
+    "weight": 13.0
   },
   {
     "code": "FRAUD_UNUSUAL_DEVICE_CHANNEL",
@@ -58,6 +76,24 @@
     "description": "Viele unterschiedliche Geräte/Kanäle in kurzer Zeit",
     "domain": "FRAUD",
     "weight": 9.5
+  },
+  {
+    "code": "FRAUD_DEVICE_MISMATCH",
+    "description": "Device-Fingerprint wechselt unerwartet",
+    "domain": "FRAUD",
+    "weight": 11.0
+  },
+  {
+    "code": "FRAUD_CARD_NOT_PRESENT",
+    "description": "Hochwertige Card-Not-Present-Buchung",
+    "domain": "FRAUD",
+    "weight": 12.0
+  },
+  {
+    "code": "FRAUD_VELOCITY_CNP",
+    "description": "CNP-Velocity in kurzer Zeit",
+    "domain": "FRAUD",
+    "weight": 10.0
   },
   {
     "code": "FRAUD_REFUND_CAROUSEL",
@@ -88,6 +124,12 @@
     "description": "Serielle Hilfszahlungen an ein Konflikt-NGO-Korridorprofil",
     "domain": "TERRORIST_FINANCING",
     "weight": 14.5
+  },
+  {
+    "code": "TF_DUAL_USE_GOODS",
+    "description": "Dual-Use-Güter mit Konflikt-/Sanktionsbezug",
+    "domain": "TERRORIST_FINANCING",
+    "weight": 10.5
   },
   {
     "code": "TAX_LOW_TAX_JURISDICTION",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
@@ -9,7 +11,7 @@ from typing import Dict, List
 from .auth import SecurityBootstrap
 from .case_management import CaseManagementService
 from .config_loader import safe_load_indicators, safe_load_thresholds
-from .domain import Alert, Transaction
+from .domain import Alert, CaseNote, CaseStatus, Transaction
 from .ingestion import TransactionIngestionService, sample_accounts, sample_customers
 from .news_service import NewsService, sample_news
 from .persistence import PersistenceLayer
@@ -19,13 +21,15 @@ from .web import DashboardServer
 
 class RealTimeOrchestrator:
     def __init__(self) -> None:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
         security = SecurityBootstrap()
         session = security.provision_internal_operator()
         self.session_manager = security.session_manager
         self.registry = security.registry
         self.audit = security.audit
 
-        self.persistence = PersistenceLayer()
+        db_path = os.getenv("CODEX_DB_PATH", "codex.db")
+        self.persistence = PersistenceLayer(db_path=db_path)
 
         self.customers = sample_customers()
         self.accounts = sample_accounts(self.customers)
@@ -49,7 +53,10 @@ class RealTimeOrchestrator:
         self.alert_history: List[Alert] = []
         self.medium_flags = 0
         self.session = session
-        self.dashboard_server = DashboardServer(self.persistence)
+        dashboard_port = int(os.getenv("CODEX_DASHBOARD_PORT", "8000"))
+        dash_user = os.getenv("CODEX_DASHBOARD_USER", "analyst")
+        dash_pass = os.getenv("CODEX_DASHBOARD_PASSWORD", "analyst")
+        self.dashboard_server = DashboardServer(self.persistence, user=dash_user, password=dash_pass, port=dashboard_port)
 
     async def start(self) -> None:
         self._guard_internal_access()
@@ -79,6 +86,7 @@ class RealTimeOrchestrator:
                     score=score,
                     evaluated_indicators=evaluated,
                     created_at=datetime.utcnow(),
+                    priority="High" if risk_level == "High" else "Normal",
                 )
                 self.alerts[alert.id] = alert
                 self.alert_history.append(alert)
@@ -174,9 +182,9 @@ class RealTimeOrchestrator:
             )
 
     def _print_case_statuses(self) -> None:
-        statuses: Dict[str, int] = {"Open": 0, "Investigating": 0, "Closed": 0}
+        statuses: Dict[str, int] = {s.name: 0 for s in CaseStatus}
         for case in self.case_manager.summary():
-            statuses[case.status] = statuses.get(case.status, 0) + 1
+            statuses[case.status.name] = statuses.get(case.status.name, 0) + 1
         print(
             "Case-Status: "
             + ", ".join([f"{status} {count}" for status, count in statuses.items() if count])

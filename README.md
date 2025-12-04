@@ -174,11 +174,24 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 
 - Transaktions-Streaming mit realistischeren Szenarien (Structuring, Konfliktregionen, Offshore-Spikes, Crypto-Mixer-Bursts, Refund-Carousels, Aid-Corridor-Spendenstory, Alltagsverkehr).
 - Erweiterte Axiom-Engine mit PEP-Hits, Velocity-Spending, Income-Mismatch sowie neuen Regeln für Cash-Intensität, strukturierte Kleinspenden (TF), Aid-Corridor-Routen und Offshore-Hopping (Tax).
-- **Konfigurierbare Regeln**: `config/indicators.json` und `config/thresholds.json` können ohne Codeänderung angepasst werden; die Engine lädt Gewichte/Thresholds zur Laufzeit.
-- **Persistenz (SQLite)**: Alle Transaktionen, Alerts und Cases werden in `codex.db` abgelegt; die Historie pro Account wird für Structuring-/Velocity-Regeln verwendet.
-- **Mini-UI**: Ein schlanker, interner Web-View unter http://localhost:8000 listet Alerts; http://localhost:8000/cases zeigt Cases (read-only).
+- **Konfigurierbare Regeln**: `config/indicators.json` und `config/thresholds.json` können ohne Codeänderung angepasst werden; die Engine lädt Gewichte/Thresholds zur Laufzeit und validiert das Schema beim Start (bricht sauber ab, falls ungültig).
+- **Persistenz (SQLite)**: Alle Transaktionen, Alerts und Cases werden in `codex.db` abgelegt; die Historie pro Account wird für Structuring-/Velocity-Regeln verwendet. Schema-Version wird bei Start geprüft (Drop & Recreate für Proto-Versionen).
+- **Mini-UI**: Ein schlanker, interner Web-View unter http://localhost:8000 listet Alerts; http://localhost:8000/cases zeigt Cases (read-only) – Basic Auth via `CODEX_DASHBOARD_USER` / `CODEX_DASHBOARD_PASSWORD`.
 - Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome) plus Sektion „Letzte Alerts“ mit Indikator-Erklärungen.
 - Login-/2FA-Pflicht: Sicherheits-Bootstrap erzeugt Nutzer + Passwort + 2FA-Code, versendet Welcome-Mail und erzwingt "Internal Only"-Modus, bevor Streaming und Risk Engine starten.
+
+### Architektur (ASCII)
+```
+[Ingestion] -> [Risk Engine] -> [Alerts] -> [Case Mgmt]
+    |             |               |            |
+    |             |               |            +-> SQLite (cases, notes)
+    |             |               +-> SQLite (alerts, rationales)
+    |             +-> Config (indicators.json, thresholds.json, validated)
+    +-> SQLite (transactions, history windows)
+
+[NewsService] -> [Console Dashboard]
+[Dashboard Server (Basic Auth)] -> /alerts, /cases (read-only)
+```
 
 ### Quickstart
 1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
@@ -186,7 +199,29 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
    ```bash
    python -m app.main
    ```
+   Optionale Umgebungsvariablen:
+   - `CODEX_DB_PATH` (Standard `codex.db`)
+   - `CODEX_DASHBOARD_PORT` (Standard `8000`)
+   - `CODEX_DASHBOARD_USER` / `CODEX_DASHBOARD_PASSWORD` für das Web-Dashboard
 3) Abbruch jederzeit via `Ctrl+C`.
+4) Tests: `python -m pytest`
+
+#### Schritt-für-Schritt (Portfolio-tauglich)
+```bash
+git clone <repo-url>
+cd FinancialMajorRiskTaskForce
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt  # falls vorhanden, sonst pytest installieren
+python -m pytest
+python -m app.main
+# Dashboard (Basic Auth): http://localhost:8000/alerts
+# Cases: http://localhost:8000/cases
+```
+
+### Demo-Flow (Story)
+- **Problemstellung**: Near-Realtime AML/TF/Fraud/Tax-Risikoerkennung mit Case-Management-Light.
+- **Scenario Examples**: Structuring/Smurfing, PEP mit Offshore-Layering, NGO-Spenden in Konfliktkorridoren, Dual-Use-Lieferungen, Card-Not-Present-Velocity.
+- **Flow**: Ingestion liefert Szenarien → Risk Engine bewertet Indikatoren (Config-validiert) → High-Risk erzeugt Alerts → Alerts werden Cases zugeordnet (Status OPEN/IN_REVIEW/ESCALATED/CLOSED, Label z.B. SAR_FILED) → Notes und Audit landen in SQLite → Web-Dashboard zeigt gefilterte Alerts/Cases (Basic Auth).
 
 Die Web-Ansicht ist read-only und lauscht auf Port 8000, solange der Prozess läuft.
 
