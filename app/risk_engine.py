@@ -4,7 +4,7 @@ import math
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 from .domain import Account, Customer, EvaluatedIndicator, RiskDomain, RiskIndicator, Transaction
 

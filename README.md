@@ -142,6 +142,12 @@ public class RiskScoringEngine
 - Domain-Breakdown und Top-Axiome (Trefferzählung) werden in festen Abständen (alle 8 Transaktionen) ausgegeben.
 - News-Ticker rotiert Headlines; lässt sich in WPF via `ItemsControl` + `Storyboard` nachbilden.
 
+## Zugriff & Sicherheit (Login, 2FA, Welcome Mail)
+- Interner Zugriff als Default: Die Runtime ist als "Internal Only" markiert und blockiert öffentliche Nutzung.
+- Bei Start wird ein Operator (`operator@fmr-taskforce.local`) registriert, ein sicheres Passwort generiert, ein 6-stelliger 2FA-Code ausgegeben und eine Welcome-Mail in der Konsole protokolliert.
+- Der Login erfolgt nur bei gültigem Passwort **und** korrektem 2FA-Code; andernfalls schlägt der Session-Aufbau fehl.
+- `AccessScope` markiert Objekte/Services als `PUBLIC` oder `INTERNAL_ONLY` und schützt die Echtzeit-Funktionen.
+
 ## Reporting & Dashboards
 - KPIs nach Domain (AML/TF/Fraud/Tax), Risikolevel Low/Medium/High.
 - Heatmaps nach Kunde, Land, Produkt, Kanal.
@@ -170,6 +176,7 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 - Alert-Generierung, Case-Bündelung mit Auto-Eskalation (ab 3 Alerts → Investigating) und Domain-Breakdown samt kurzer Rationale pro Treffer.
 - News-Ticker mit rotierenden Headlines.
 - Konsolen-Dashboard mit KPI-Zwischenständen (verarbeitete TX, Alerts, Flags, Domain-Breakdown, Top-Axiome) plus Sektion „Letzte Alerts“ mit Indikator-Erklärungen.
+- Login-/2FA-Pflicht: Sicherheits-Bootstrap erzeugt Nutzer + Passwort + 2FA-Code, versendet Welcome-Mail und erzwingt "Internal Only"-Modus, bevor Streaming und Risk Engine starten.
 
 ### Quickstart
 1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
@@ -180,6 +187,12 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 3) Abbruch jederzeit via `Ctrl+C`.
 
 Die Simulation erzeugt fortlaufend Transaktionen, berechnet Scores und druckt Alerts/Cases sowie den News-Ticker auf die Konsole. Die Axiome/Indikatoren findest du in `app/risk_engine.py`, die Streams/Beispiele in `app/ingestion.py` und `app/news_service.py`. Das Konsolen-Dashboard wird alle acht Transaktionen aktualisiert und zeigt Domain-Breakdowns sowie Hit-Statistiken.
+
+### Sicherheits-Bootstrap beobachten
+Beim Start erscheinen im Terminal:
+- `[MAIL] ...` mit der Welcome-Mail inklusive generiertem Passwort und 2FA-Code (zur Demo-Ausgabe),
+- `[AUTH]` Meldungen für den Session-Aufbau und
+- `[ACCESS] Internal-only runtime verified` als Nachweis, dass interne Ressourcen geschützt sind.
 
 ## Nächste Schritte
 - Dotnet-/WPF-Solution aufsetzen (wenn Zielsystem verfügbar ist) und Python-Prototyp-Logik in C# übertragen.

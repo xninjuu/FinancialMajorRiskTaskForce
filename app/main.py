@@ -5,6 +5,7 @@ import itertools
 from datetime import datetime
 from typing import Dict, List
 
+from .auth import AccessScope, SecurityBootstrap
 from .case_management import CaseManagementService
 from .domain import Alert, Transaction
 from .ingestion import TransactionIngestionService, sample_accounts, sample_customers
@@ -14,6 +15,9 @@ from .risk_engine import RiskScoringEngine, RiskThresholds, default_indicators
 
 class RealTimeOrchestrator:
     def __init__(self) -> None:
+        security = SecurityBootstrap()
+        session = security.provision_internal_operator()
+
         self.customers = sample_customers()
         self.accounts = sample_accounts(self.customers)
         self.customer_index = {c.id: c for c in self.customers}
@@ -33,8 +37,11 @@ class RealTimeOrchestrator:
         self.recent_scores: List[float] = []
         self.alert_history: List[Alert] = []
         self.medium_flags = 0
+        self.session = session
+        self.security_summary = security.summary()
 
     async def start(self) -> None:
+        self._guard_internal_access()
         await asyncio.gather(
             self._run_transactions(),
             self._run_news_ticker(),
@@ -82,6 +89,10 @@ class RealTimeOrchestrator:
         print(f"Verarbeitete Transaktionen: {self.total_processed}")
         print(f"Alerts gesamt: {high_risk} | Flags (Medium): {self.medium_flags}")
         print(f"Offene Cases: {len(open_cases)}")
+        print(
+            "Access Policy: INTERNAL ONLY | angemeldet als "
+            f"{self.session.user.email} ({self.session.user.role})"
+        )
         self._print_case_statuses()
         self._print_score_window()
         self._print_domain_breakdown()
@@ -91,6 +102,11 @@ class RealTimeOrchestrator:
         for code, count in top_indicators.items():
             print(f"- {code}: {count}")
         print("==========================\n")
+
+    def _guard_internal_access(self) -> None:
+        if self.session.user.access_scope != AccessScope.INTERNAL_ONLY:
+            raise PermissionError("Realtime functions require internal access")
+        print("[ACCESS] Internal-only runtime verified.")
 
     def _aggregate_indicator_hits(self) -> Dict[str, int]:
         counts: Dict[str, int] = {}
