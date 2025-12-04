@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
+from .runtime_paths import resolve_config_path
+
 from .domain import RiskDomain, RiskIndicator
 from .risk_engine import RiskThresholds
 
@@ -49,7 +51,9 @@ def _read_json(path: Path) -> dict:
         return json.load(handle)
 
 
-def load_indicators_config(path: str | Path) -> List[RiskIndicator]:
+def load_indicators_config(path: str | Path | None) -> List[RiskIndicator]:
+    if path is None:
+        raise FileNotFoundError("indicators config not found")
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(file_path)
@@ -71,7 +75,9 @@ def load_indicators_config(path: str | Path) -> List[RiskIndicator]:
     return indicators
 
 
-def load_thresholds_config(path: str | Path) -> RiskThresholds:
+def load_thresholds_config(path: str | Path | None) -> RiskThresholds:
+    if path is None:
+        raise FileNotFoundError("threshold config not found")
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(file_path)
@@ -86,19 +92,29 @@ def load_thresholds_config(path: str | Path) -> RiskThresholds:
     return RiskThresholds(low=low, medium=medium)
 
 
-def safe_load_indicators(*, path: str | Path, fallback: Iterable[RiskIndicator]) -> List[RiskIndicator]:
+def safe_load_indicators(*, path: str | Path | None, fallback: Iterable[RiskIndicator]) -> List[RiskIndicator]:
     try:
         return load_indicators_config(path)
     except FileNotFoundError:
+        print("[CONFIG] indicators.json not found – using embedded defaults.")
         return list(fallback)
     except ConfigValidationError as exc:
         raise SystemExit(f"Invalid indicators config: {exc}")
 
 
-def safe_load_thresholds(*, path: str | Path, fallback: RiskThresholds) -> RiskThresholds:
+def safe_load_thresholds(*, path: str | Path | None, fallback: RiskThresholds) -> RiskThresholds:
     try:
         return load_thresholds_config(path)
     except FileNotFoundError:
+        print("[CONFIG] thresholds.json not found – using embedded defaults.")
         return fallback
     except ConfigValidationError as exc:
         raise SystemExit(f"Invalid thresholds config: {exc}")
+
+
+def resolve_indicator_path() -> Path | None:
+    return resolve_config_path("indicators.json")
+
+
+def resolve_threshold_path() -> Path | None:
+    return resolve_config_path("thresholds.json")

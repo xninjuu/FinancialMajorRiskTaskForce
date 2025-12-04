@@ -208,6 +208,28 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 3) Abbruch jederzeit via `Ctrl+C`.
 4) Tests: `python -m pytest`
 
+### Windows: Einzelne EXE mit PyInstaller
+Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), `pyinstaller` installiert (`pip install pyinstaller`).
+
+1) Build anstoßen (aus dem Repo-Root):
+   ```powershell
+   pyinstaller --clean --noconfirm FMR_TaskForce.spec
+   # oder ohne Spec, minimal:
+   # pyinstaller --onefile --name FMR_TaskForce app/main.py --add-data "config/indicators.json;config" --add-data "config/thresholds.json;config"
+   ```
+   Der Build legt `dist/FMR_TaskForce.exe` an.
+
+2) Start per Doppelklick oder per `start.bat` (Root des Repos):
+   ```bat
+   start.bat
+   ```
+   Das Batch-Skript hält das Fenster offen und meldet Fehler klar.
+
+3) Laufzeitpfade:
+   - Configs (`indicators.json`, `thresholds.json`) werden aus `config/` neben der EXE oder aus dem eingebetteten Bundle gelesen. Optional kann `CODEX_CONFIG_DIR` gesetzt werden.
+   - SQLite-DB: Standard `codex.db` liegt neben der EXE (oder via `CODEX_DB_PATH`).
+   - `CODEX_HOLD_ON_EXIT=0` deaktiviert die Eingabeaufforderung am Ende (für CI).
+
 #### Schritt-für-Schritt (Portfolio-tauglich)
 ```bash
 git clone <repo-url>

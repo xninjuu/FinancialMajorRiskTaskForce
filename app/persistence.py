@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 
 from .domain import Alert, Case, CaseNote, CaseStatus, Transaction
+from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
@@ -14,6 +15,7 @@ class PersistenceLayer:
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
+        ensure_parent_dir(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._init_db()

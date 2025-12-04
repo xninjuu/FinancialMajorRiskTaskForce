@@ -5,17 +5,22 @@ import itertools
 import logging
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List
 
 from .auth import SecurityBootstrap
 from .case_management import CaseManagementService
-from .config_loader import safe_load_indicators, safe_load_thresholds
+from .config_loader import (
+    resolve_indicator_path,
+    resolve_threshold_path,
+    safe_load_indicators,
+    safe_load_thresholds,
+)
 from .domain import Alert, CaseNote, CaseStatus, Transaction
 from .ingestion import TransactionIngestionService, sample_accounts, sample_customers
 from .news_service import NewsService, sample_news
 from .persistence import PersistenceLayer
 from .risk_engine import RiskScoringEngine, RiskThresholds, default_indicators
+from .runtime_paths import resolve_runtime_file
 from .web import DashboardServer
 
 
@@ -28,7 +33,9 @@ class RealTimeOrchestrator:
         self.registry = security.registry
         self.audit = security.audit
 
-        db_path = os.getenv("CODEX_DB_PATH", "codex.db")
+        db_path = os.getenv("CODEX_DB_PATH")
+        if not db_path:
+            db_path = str(resolve_runtime_file("codex.db"))
         self.persistence = PersistenceLayer(db_path=db_path)
 
         self.customers = sample_customers()
@@ -36,8 +43,14 @@ class RealTimeOrchestrator:
         self.customer_index = {c.id: c for c in self.customers}
         self.account_index = {a.id: a for a in self.accounts}
         self.ingestion = TransactionIngestionService(self.customers, self.accounts)
-        indicator_config = safe_load_indicators(path=Path("config/indicators.json"), fallback=default_indicators())
-        thresholds = safe_load_thresholds(path=Path("config/thresholds.json"), fallback=RiskThresholds())
+        indicator_config = safe_load_indicators(
+            path=resolve_indicator_path(),
+            fallback=default_indicators(),
+        )
+        thresholds = safe_load_thresholds(
+            path=resolve_threshold_path(),
+            fallback=RiskThresholds(),
+        )
         self.risk_engine = RiskScoringEngine(
             indicator_config,
             thresholds=thresholds,
@@ -220,6 +233,14 @@ def main() -> None:
         asyncio.run(orchestrator.start())
     except KeyboardInterrupt:
         print("Beende Echtzeit-Simulation…")
+    except Exception as exc:  # pragma: no cover - safety for PyInstaller runtime
+        print(f"Unerwarteter Fehler: {exc}")
+    finally:
+        if os.getenv("CODEX_HOLD_ON_EXIT", "1") != "0":
+            try:
+                input("Server gestoppt. ENTER zum Schließen…")
+            except EOFError:
+                pass
 
 
 if __name__ == "__main__":
