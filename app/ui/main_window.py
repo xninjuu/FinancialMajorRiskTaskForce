@@ -28,6 +28,13 @@ from app.storage.db import Database
 from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offshore_transactions, structuring_burst
 from app.ui.case_timeline import CaseTimelineDialog
 from app.ui.network_view import NetworkView
+from app.ui.components import (
+    apply_dark_palette,
+    create_header_pill,
+    create_pill,
+    update_pill,
+    SectionCard,
+)
 
 
 class SimulationWorker(QtCore.QThread):
@@ -135,50 +142,51 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("FMR TaskForce Codex - Desktop")
         self.resize(1200, 800)
 
-        self.tabs = QtWidgets.QTabWidget()
-        self.setCentralWidget(self.tabs)
+        apply_dark_palette(self)
 
-        self.dashboard_tab = QtWidgets.QWidget()
-        self.alerts_tab = QtWidgets.QWidget()
-        self.cases_tab = QtWidgets.QWidget()
-        self.timeline_tab = QtWidgets.QWidget()
-        self.network_tab = QtWidgets.QWidget()
-        self.customers_tab = QtWidgets.QWidget()
-        self.kyc_tab = QtWidgets.QWidget()
-        self.evidence_tab = QtWidgets.QWidget()
-        self.compare_tab = QtWidgets.QWidget()
-        self.cluster_tab = QtWidgets.QWidget()
-        self.actor_tab = QtWidgets.QWidget()
-        self.security_tab = QtWidgets.QWidget()
-        self.settings_tab = QtWidgets.QWidget()
+        self.container = QtWidgets.QWidget()
+        self.setCentralWidget(self.container)
+        root_layout = QtWidgets.QHBoxLayout(self.container)
+        root_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.tabs.addTab(self.dashboard_tab, "Dashboard")
-        self.tabs.addTab(self.alerts_tab, "Alerts")
-        self.tabs.addTab(self.cases_tab, "Cases")
-        self.tabs.addTab(self.timeline_tab, "Case Timeline")
-        self.tabs.addTab(self.evidence_tab, "Evidence")
-        self.tabs.addTab(self.compare_tab, "Compare Cases")
-        self.tabs.addTab(self.cluster_tab, "Alert Clusters")
-        self.tabs.addTab(self.customers_tab, "Customers / Accounts")
-        self.tabs.addTab(self.kyc_tab, "KYC Risk")
-        self.tabs.addTab(self.network_tab, "Network")
-        self.tabs.addTab(self.actor_tab, "Actors")
-        self.tabs.addTab(self.security_tab, "Security / Audit")
-        self.tabs.addTab(self.settings_tab, "Settings")
+        self.nav_list = QtWidgets.QListWidget()
+        self.nav_list.setFixedWidth(220)
+        self.nav_list.setObjectName("navList")
+        self.nav_list.setStyleSheet("QListWidget#navList { background:#1b1d23; color:#e5e7eb; border-right:1px solid #2c2f36; }")
+        root_layout.addWidget(self.nav_list)
 
-        self._build_dashboard()
-        self._build_alerts()
-        self._build_cases()
-        self._build_timeline()
-        self._build_evidence()
-        self._build_compare()
-        self._build_clusters()
-        self._build_customers()
-        self._build_kyc()
-        self._build_network()
-        self._build_actor()
-        self._build_security()
-        self._build_settings()
+        content_column = QtWidgets.QVBoxLayout()
+        content_column.setSpacing(8)
+        root_layout.addLayout(content_column)
+
+        self.header_bar = self._build_header_bar()
+        content_column.addWidget(self.header_bar)
+
+        self.content_stack = QtWidgets.QStackedWidget()
+        content_column.addWidget(self.content_stack)
+
+        pages: list[tuple[str, QtWidgets.QWidget]] = [
+            ("Dashboard", self._build_dashboard()),
+            ("Alerts", self._build_alerts()),
+            ("Cases", self._build_cases()),
+            ("Customers", self._build_customers()),
+            ("KYC Risk", self._build_kyc()),
+            ("Evidence Locker", self._build_evidence()),
+            ("Actor Insights", self._build_actor()),
+            ("Graph View", self._build_network()),
+            ("Timeline", self._build_timeline()),
+            ("Audit", self._build_security()),
+            ("Alert Clusters", self._build_clusters()),
+            ("Compare Cases", self._build_compare()),
+            ("Settings", self._build_settings()),
+        ]
+
+        for title, widget in pages:
+            self.nav_list.addItem(title)
+            self.content_stack.addWidget(widget)
+
+        self.nav_list.currentRowChanged.connect(self.content_stack.setCurrentIndex)
+        self.nav_list.setCurrentRow(0)
 
         self._activity_timer = QtCore.QTimer(self)
         self._activity_timer.timeout.connect(self._check_session_timeout)
@@ -190,9 +198,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.installEventFilter(self)
 
+    def _build_header_bar(self) -> QtWidgets.QWidget:
+        bar = SectionCard()
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 12, 8)
+        title = QtWidgets.QLabel("FMR TaskForce – Investigator Workspace")
+        title.setStyleSheet("font-size:18px; font-weight:700;")
+        layout.addWidget(title)
+
+        layout.addStretch(1)
+
+        secure_label = "SECURE MODE" if self.settings and self.settings.secure_mode else "STANDARD MODE"
+        secure_state = "success" if self.settings and self.settings.secure_mode else "warning"
+        self.secure_pill = create_header_pill(secure_label, secure_state)
+        layout.addWidget(self.secure_pill)
+
+        self.role_badge = create_header_pill(self.role or "ANALYST", "info")
+        layout.addWidget(self.role_badge)
+
+        if self.tamper_warnings:
+            warning_pill = create_header_pill("TAMPER WARNINGS", "alert")
+            warning_pill.setToolTip("\n".join(self.tamper_warnings))
+            layout.addWidget(warning_pill)
+
+        user_label = QtWidgets.QLabel(f"Signed in as {self.username}")
+        layout.addWidget(user_label)
+        return bar
+
     # region UI builders
-    def _build_dashboard(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_dashboard(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.kpi_alerts = QtWidgets.QLabel("Alerts: 0")
         self.kpi_cases = QtWidgets.QLabel("Open Cases: 0")
         self.kpi_high = QtWidgets.QLabel("High Alerts (24h): 0")
@@ -202,10 +238,11 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.kpi_cases)
         layout.addWidget(self.kpi_high)
         layout.addStretch(1)
-        self.dashboard_tab.setLayout(layout)
+        return page
 
-    def _build_alerts(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_alerts(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         controls = QtWidgets.QHBoxLayout()
         self.alert_refresh_btn = QtWidgets.QPushButton("Refresh")
         controls.addWidget(self.alert_refresh_btn)
@@ -218,42 +255,83 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.alert_table)
 
         self.alert_refresh_btn.clicked.connect(self._load_alerts)
-        self.alerts_tab.setLayout(layout)
+        return page
 
-    def _build_cases(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_cases(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        outer = QtWidgets.QVBoxLayout(page)
+
         controls = QtWidgets.QHBoxLayout()
         self.case_refresh_btn = QtWidgets.QPushButton("Refresh")
         self.case_close_btn = QtWidgets.QPushButton("Close Case")
-        self.case_timeline_btn = QtWidgets.QPushButton("Timeline")
+        self.case_timeline_btn = QtWidgets.QPushButton("Open Timeline")
         self.case_export_btn = QtWidgets.QPushButton("Forensic Export")
         controls.addWidget(self.case_refresh_btn)
         controls.addWidget(self.case_close_btn)
         controls.addWidget(self.case_timeline_btn)
         controls.addWidget(self.case_export_btn)
         controls.addStretch(1)
-        layout.addLayout(controls)
+        outer.addLayout(controls)
 
+        splitter = QtWidgets.QSplitter()
+        splitter.setHandleWidth(4)
+
+        left_panel = SectionCard()
+        left_layout = QtWidgets.QVBoxLayout(left_panel)
         self.case_table = QtWidgets.QTableWidget(0, 5)
         self.case_table.setHorizontalHeaderLabels(["Case ID", "Status", "Priority", "Created", "Updated"])
         self.case_table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.case_table)
+        left_layout.addWidget(QtWidgets.QLabel("Cases"))
+        left_layout.addWidget(self.case_table)
+
+        self.case_timeline_table = QtWidgets.QTableWidget(0, 3)
+        self.case_timeline_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Summary"])
+        self.case_timeline_table.horizontalHeader().setStretchLastSection(True)
+        left_layout.addWidget(QtWidgets.QLabel("Case Timeline"))
+        left_layout.addWidget(self.case_timeline_table)
+
+        splitter.addWidget(left_panel)
+
+        right_panel = SectionCard()
+        right_layout = QtWidgets.QVBoxLayout(right_panel)
+
+        header_row = QtWidgets.QHBoxLayout()
+        self.case_title = QtWidgets.QLabel("Select a case")
+        self.case_status_pill = create_pill("Unknown", "neutral")
+        header_row.addWidget(self.case_title)
+        header_row.addStretch(1)
+        header_row.addWidget(self.case_status_pill)
+        right_layout.addLayout(header_row)
+
+        self.case_alerts_table = QtWidgets.QTableWidget(0, 4)
+        self.case_alerts_table.setHorizontalHeaderLabels(["Alert", "Score", "Level", "Domain"])
+        self.case_alerts_table.horizontalHeader().setStretchLastSection(True)
+        right_layout.addWidget(QtWidgets.QLabel("Related Alerts"))
+        right_layout.addWidget(self.case_alerts_table)
 
         self.case_notes = QtWidgets.QTextEdit()
         self.case_notes.setPlaceholderText("Add note (ENTER to save)")
-        self.case_notes.setMaximumHeight(100)
-        layout.addWidget(self.case_notes)
+        self.case_notes.setMaximumHeight(120)
+        right_layout.addWidget(QtWidgets.QLabel("Case Narrative & Notes"))
+        right_layout.addWidget(self.case_notes)
+
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        outer.addWidget(splitter)
 
         self.case_refresh_btn.clicked.connect(self._load_cases)
         self.case_close_btn.clicked.connect(self._close_selected_case)
         self.case_timeline_btn.clicked.connect(self._open_timeline)
         self.case_export_btn.clicked.connect(self._export_case)
         self.case_notes.installEventFilter(self)
+        self.case_table.itemSelectionChanged.connect(self._load_case_details)
 
-        self.cases_tab.setLayout(layout)
+        return page
 
-    def _build_timeline(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_timeline(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.timeline_case_input = QtWidgets.QLineEdit()
         self.timeline_case_input.setPlaceholderText("Case ID")
         self.timeline_refresh = QtWidgets.QPushButton("Load Timeline")
@@ -265,30 +343,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Description"])
         self.timeline_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.timeline_table)
-        self.timeline_tab.setLayout(layout)
         self.timeline_refresh.clicked.connect(self._load_timeline_tab)
+        return page
 
-    def _build_customers(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_customers(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.customer_table = QtWidgets.QTableWidget(0, 4)
         self.customer_table.setHorizontalHeaderLabels(["Customer", "Country", "PEP", "Annual Income"])
         self.customer_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.customer_table)
         self.customer_table.itemSelectionChanged.connect(self._load_selected_customer_kyc)
-        self.customers_tab.setLayout(layout)
+        return page
 
-    def _build_kyc(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_kyc(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.kyc_summary = QtWidgets.QLabel("Select a customer to view KYC risk.")
         self.kyc_table = QtWidgets.QTableWidget(0, 3)
         self.kyc_table.setHorizontalHeaderLabels(["Dimension", "Score", "Rationale"])
         self.kyc_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.kyc_summary)
         layout.addWidget(self.kyc_table)
-        self.kyc_tab.setLayout(layout)
+        return page
 
-    def _build_evidence(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_evidence(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         controls = QtWidgets.QHBoxLayout()
         self.evidence_case_input = QtWidgets.QLineEdit()
         self.evidence_case_input.setPlaceholderText("Case ID")
@@ -302,12 +383,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.evidence_table.setHorizontalHeaderLabels(["File", "Hash", "Added By", "Sealed", "Created"])
         self.evidence_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.evidence_table)
-        self.evidence_tab.setLayout(layout)
         self.evidence_add_btn.clicked.connect(self._add_evidence)
         self.evidence_seal_btn.clicked.connect(self._seal_case)
+        return page
 
-    def _build_compare(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_compare(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         inputs = QtWidgets.QHBoxLayout()
         self.compare_case_a = QtWidgets.QLineEdit()
         self.compare_case_a.setPlaceholderText("Case A")
@@ -323,45 +405,50 @@ class MainWindow(QtWidgets.QMainWindow):
         self.compare_text.setReadOnly(True)
         layout.addLayout(inputs)
         layout.addWidget(self.compare_text)
-        self.compare_tab.setLayout(layout)
         self.compare_btn.clicked.connect(self._compare_cases)
         self.copy_compare_btn.clicked.connect(self._copy_compare)
+        return page
 
-    def _build_clusters(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_clusters(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.cluster_table = QtWidgets.QTableWidget(0, 4)
         self.cluster_table.setHorizontalHeaderLabels(["Domain", "Risk", "Count", "Latest"])
         self.cluster_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.cluster_table)
-        self.cluster_tab.setLayout(layout)
+        return page
 
-    def _build_actor(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_actor(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.actor_table = QtWidgets.QTableWidget(0, 4)
         self.actor_table.setHorizontalHeaderLabels(["Customer", "Alerts", "Cases", "Baseline Avg"])
         self.actor_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.actor_table)
-        self.actor_tab.setLayout(layout)
+        return page
 
-    def _build_network(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_network(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.network_view = NetworkView(self.db)
         refresh_btn = QtWidgets.QPushButton("Refresh Graph")
         refresh_btn.clicked.connect(self.network_view.refresh)
         layout.addWidget(refresh_btn)
         layout.addWidget(self.network_view)
-        self.network_tab.setLayout(layout)
+        return page
 
-    def _build_security(self):
-        layout = QtWidgets.QVBoxLayout()
+    def _build_security(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
         self.audit_table = QtWidgets.QTableWidget(0, 4)
         self.audit_table.setHorizontalHeaderLabels(["Timestamp", "User", "Action", "Target"])
         self.audit_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.audit_table)
-        self.security_tab.setLayout(layout)
+        return page
 
-    def _build_settings(self):
-        layout = QtWidgets.QFormLayout()
+    def _build_settings(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QFormLayout(page)
         self.role_label = QtWidgets.QLabel(self.role)
         layout.addRow("Current role", self.role_label)
         if self.settings:
@@ -372,7 +459,7 @@ class MainWindow(QtWidgets.QMainWindow):
             warnings_box.setReadOnly(True)
             warnings_box.setMaximumHeight(120)
             layout.addRow("Security warnings", warnings_box)
-        self.settings_tab.setLayout(layout)
+        return page
 
     # endregion
 
@@ -407,12 +494,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 row["created_at"],
                 row["transaction_id"],
                 f"{row['score']:.1f}",
-                row["risk_level"],
+                "",  # pill placeholder
                 row["domain"],
                 row["case_id"] or "",
             ]
             for col, value in enumerate(values):
-                self.alert_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                if col == 3:
+                    self.alert_table.setCellWidget(
+                        idx, col, create_pill(row["risk_level"], self._risk_state(row["risk_level"]))
+                    )
+                else:
+                    self.alert_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
 
     def _load_cases(self):
         rows = self.db.list_cases()
@@ -420,7 +512,14 @@ class MainWindow(QtWidgets.QMainWindow):
         for idx, row in enumerate(rows):
             values = [row["id"], row["status"], row["priority"], row["created_at"], row["updated_at"]]
             for col, value in enumerate(values):
-                self.case_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                pill_state = self._status_state(row["status"]) if col == 1 else None
+                if pill_state:
+                    self.case_table.setCellWidget(idx, col, create_pill(str(value), pill_state))
+                else:
+                    self.case_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        if rows:
+            self.case_table.selectRow(0)
+            self._load_case_details()
 
     def _load_customers(self):
         customers = make_customers()
@@ -429,6 +528,43 @@ class MainWindow(QtWidgets.QMainWindow):
             values = [c.name, c.country, "Yes" if c.is_pep else "No", f"{c.annual_declared_income:,.0f}"]
             for col, value in enumerate(values):
                 self.customer_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+
+    def _load_case_details(self) -> None:
+        row = self.case_table.currentRow()
+        if row < 0:
+            return
+        case_id_item = self.case_table.item(row, 0)
+        status_widget = self.case_table.cellWidget(row, 1)
+        if not case_id_item:
+            return
+        case_id = case_id_item.text()
+        status_text = status_widget.text() if status_widget else self.case_table.item(row, 1).text()
+        update_pill(self.case_status_pill, status_text, self._status_state(status_text))
+        self.case_title.setText(f"Case {case_id}")
+
+        events = self.db.case_timeline(case_id)
+        self.case_timeline_table.setRowCount(len(events))
+        for idx, event in enumerate(events):
+            self.case_timeline_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(str(event.get("timestamp"))))
+            self.case_timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event.get("type"))))
+            self.case_timeline_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(str(event.get("description"))))
+
+        alerts = self.db.alerts_for_case(case_id)
+        self.case_alerts_table.setRowCount(len(alerts))
+        for idx, alert in enumerate(alerts):
+            level = alert.get("risk_level") or "Unknown"
+            self.case_alerts_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(alert["id"]))
+            self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(f"{alert['score']:.1f}"))
+            self.case_alerts_table.setCellWidget(idx, 2, create_pill(level, self._risk_state(level)))
+            self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(alert.get("domain") or ""))
+
+    def _risk_state(self, level: str) -> str:
+        mapping = {"High": "alert", "Medium": "warning", "Low": "success"}
+        return mapping.get(level, "neutral")
+
+    def _status_state(self, status: str) -> str:
+        mapping = {"OPEN": "warning", "IN_REVIEW": "info", "ESCALATED": "alert", "CLOSED": "success"}
+        return mapping.get(status, "neutral")
 
     def _load_audit(self):
         rows = self.audit.recent(limit=200)
@@ -629,16 +765,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.warning(self, "Locked", "Application locked. Close and restart if you cannot log in.")
                 continue
             username, password = dialog.credentials()
-            ok, role, message = self.auth.authenticate(username, password)
-            if ok:
-                self.username = username
-                self.role = role or self.role
-                self.last_activity = datetime.utcnow()
-                self.audit.log(username, "LOGIN_SUCCESS", details="Unlocked session")
-                self.role_label.setText(self.role)
-                break
-            dialog.show_error(message or "Invalid credentials")
-            self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
+                ok, role, message = self.auth.authenticate(username, password)
+                if ok:
+                    self.username = username
+                    self.role = role or self.role
+                    self.last_activity = datetime.utcnow()
+                    self.audit.log(username, "LOGIN_SUCCESS", details="Unlocked session")
+                    self.role_label.setText(self.role)
+                    update_pill(self.role_badge, self.role, "info")
+                    break
+                dialog.show_error(message or "Invalid credentials")
+                self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
 
 
 class AppBootstrap:
