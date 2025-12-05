@@ -13,6 +13,7 @@ from app.security.tamper import verify_executable
 from app.storage.db import Database
 from app.ui.app_state import AppState
 from app.ui.login_dialog import LoginDialog
+from app.ui.register_dialog import RegisterDialog
 from app.ui.main_window import AppBootstrap, MainWindow
 
 
@@ -31,14 +32,21 @@ def main() -> None:
     generated_password = auth.bootstrap_admin()
     if generated_password:
         print("[SECURITY] Generated initial admin password (store securely):", generated_password)
+    demo_user, demo_password = auth.ensure_demo_user()
+    demo_hint = f"Demo: {demo_user} / {demo_password} (nur lokal)"
 
     app = QtWidgets.QApplication(sys.argv)
-    login = LoginDialog()
+    login = LoginDialog(demo_hint=demo_hint)
 
     while True:
-        if login.exec() == QtWidgets.QDialog.Rejected:
+        result = login.exec()
+        if result == QtWidgets.QDialog.Rejected:
             print("Login cancelled")
             sys.exit(1)
+        if result == LoginDialog.REGISTER_CODE:
+            reg = RegisterDialog(auth)
+            reg.exec()
+            continue
         username, password = login.credentials()
         ok, role, message = auth.authenticate(username, password)
         if ok:

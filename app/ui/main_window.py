@@ -67,8 +67,26 @@ class SimulationWorker(QtCore.QThread):
             cnp_velocity(accounts[0]),
         ]
         merged: List[Transaction] = []
-        for seq in bursts:
-            merged.extend(seq)
+        # stretch the simulation to keep the UI populated well beyond 30 cases
+        for cycle in range(12):
+            for seq in bursts:
+                for tx in seq:
+                    merged.append(
+                        Transaction(
+                            id=f"{tx.id}-{cycle}",
+                            account_id=tx.account_id,
+                            timestamp=tx.timestamp + timedelta(minutes=cycle * 3),
+                            amount=tx.amount + cycle * 25,
+                            currency=tx.currency,
+                            counterparty_country=tx.counterparty_country,
+                            channel=tx.channel,
+                            is_credit=tx.is_credit,
+                            merchant_category=tx.merchant_category,
+                            purpose=tx.purpose,
+                            device_id=tx.device_id,
+                            card_present=tx.card_present,
+                        )
+                    )
         return merged
 
     def run(self) -> None:

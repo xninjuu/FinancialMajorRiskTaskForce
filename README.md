@@ -253,9 +253,15 @@ python -m pytest
 python -m app.main
 ```
 
-**Demo-Login (GUI, Admin-Bootstrap)**
+**Demo-Login (GUI, Admin-Bootstrap + Quick-Account)**
 - User: `admin`
 - Passwort: via ENV `CODEX_ADMIN_PASSWORD` oder zufällig generiert beim ersten Start (wird in der Konsole angezeigt).
+- Neuer Quick-Login für sofortiges Testen (lokal, keine Admin-Rechte):
+  - User: `analyst_demo`
+  - Passwort: `FMRdemo!2025`
+  - Rolle: `ANALYST`
+- Weitere Benutzer kannst du direkt im Login-Fenster über "Registrieren" anlegen (Passwort-Policy ≥12 Zeichen). Admin-Accounts
+  bleiben dem Bootstrap vorbehalten.
 - Nutzerverwaltung liegt in SQLite (`users`-Tabelle). Rollen: ANALYST, LEAD, ADMIN (RBAC erzwingt Zugriffsrechte im UI).
 
 ### Demo-Flow (Story)

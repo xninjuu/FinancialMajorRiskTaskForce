@@ -56,6 +56,14 @@ class Database:
         self.conn.commit()
         self._ensure_user_security_columns(cursor)
 
+    def create_user(self, *, username: str, password_hash: str, role: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO users (username, password_hash, role, failed_attempts, locked_until) VALUES (?, ?, ?, 0, NULL)",
+            (username, password_hash, role),
+        )
+        self.conn.commit()
+
     def _ensure_user_security_columns(self, cursor: sqlite3.Cursor) -> None:
         cursor.execute("PRAGMA table_info(users)")
         cols = {row[1] for row in cursor.fetchall()}

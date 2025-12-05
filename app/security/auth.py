@@ -46,6 +46,38 @@ class AuthService:
         )
         return generated_password
 
+    def ensure_demo_user(self) -> tuple[str, str]:
+        """Ensure a demo analyst account exists for quick onboarding.
+
+        Returns a tuple of (username, password) for documentation/UX messaging. Password is
+        hashed before persistence and only returned so the caller can surface it to the user
+        in a controlled way (e.g., login dialog hint, README note).
+        """
+        username = os.getenv("CODEX_DEMO_USER", "analyst_demo")
+        password = os.getenv("CODEX_DEMO_PASSWORD", "FMRdemo!2025")
+        if not validate_username(username):
+            username = "analyst_demo"
+        ok, reason = validate_password_policy(password, min_length=self.min_password_length)
+        if not ok:
+            # fall back to a generated compliant password but still expose a value to the caller
+            password = os.getenv("CODEX_DEMO_PASSWORD_FALLBACK", "FMRdemo!2025-Longer")
+        if not self.db.get_user(username):
+            self.db.create_user(username=username, password_hash=self.hash_password(password), role="ANALYST")
+        return username, password
+
+    def register_user(self, *, username: str, password: str, role: str = "ANALYST") -> tuple[bool, str]:
+        if not validate_username(username):
+            return False, "Ungültiger Benutzername (3-64 Zeichen)"
+        ok, reason = validate_password_policy(password, min_length=self.min_password_length)
+        if not ok:
+            return False, reason
+        if not validate_role(role):
+            return False, "Rolle nicht erlaubt"
+        if self.db.get_user(username):
+            return False, "Benutzer existiert bereits"
+        self.db.create_user(username=username, password_hash=self.hash_password(password), role=role)
+        return True, "Benutzer angelegt"
+
     def authenticate(self, username: str, password: str) -> Tuple[bool, Optional[str], Optional[str]]:
         if not validate_username(username):
             return False, None, "Ungültiger Benutzername"
