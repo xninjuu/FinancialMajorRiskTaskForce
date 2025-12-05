@@ -3,18 +3,23 @@ from __future__ import annotations
 import itertools
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from PySide6 import QtCore, QtWidgets
 
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
+from app.config.settings import AppSettings
 from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
 from app.core.validation import sanitize_text, validate_role
+from app.core.kyc_risk import evaluate_customer
+from app.core.exporter import export_case_bundle
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
 from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offshore_transactions, structuring_burst
+from app.ui.case_timeline import CaseTimelineDialog
+from app.ui.network_view import NetworkView
 
 
 class SimulationWorker(QtCore.QThread):
@@ -78,7 +83,17 @@ class SimulationWorker(QtCore.QThread):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, db: Database, audit: AuditLogger, auth: AuthService, username: str, role: str, session_timeout_minutes: int = 15):
+    def __init__(
+        self,
+        db: Database,
+        audit: AuditLogger,
+        auth: AuthService,
+        username: str,
+        role: str,
+        session_timeout_minutes: int = 15,
+        tamper_warnings: Optional[List[str]] = None,
+        settings: Optional[AppSettings] = None,
+    ):
         super().__init__()
         self.db = db
         self.audit = audit
@@ -87,6 +102,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.role = role
         self.session_timeout = timedelta(minutes=session_timeout_minutes)
         self.last_activity = datetime.utcnow()
+        self.tamper_warnings = tamper_warnings or []
+        self.settings = settings
 
         self.setWindowTitle("FMR TaskForce Codex - Desktop")
         self.resize(1200, 800)
@@ -97,21 +114,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dashboard_tab = QtWidgets.QWidget()
         self.alerts_tab = QtWidgets.QWidget()
         self.cases_tab = QtWidgets.QWidget()
+        self.timeline_tab = QtWidgets.QWidget()
+        self.network_tab = QtWidgets.QWidget()
         self.customers_tab = QtWidgets.QWidget()
+        self.kyc_tab = QtWidgets.QWidget()
         self.security_tab = QtWidgets.QWidget()
         self.settings_tab = QtWidgets.QWidget()
 
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
         self.tabs.addTab(self.alerts_tab, "Alerts")
         self.tabs.addTab(self.cases_tab, "Cases")
+        self.tabs.addTab(self.timeline_tab, "Case Timeline")
         self.tabs.addTab(self.customers_tab, "Customers / Accounts")
+        self.tabs.addTab(self.kyc_tab, "KYC Risk")
+        self.tabs.addTab(self.network_tab, "Network")
         self.tabs.addTab(self.security_tab, "Security / Audit")
         self.tabs.addTab(self.settings_tab, "Settings")
 
         self._build_dashboard()
         self._build_alerts()
         self._build_cases()
+        self._build_timeline()
         self._build_customers()
+        self._build_kyc()
+        self._build_network()
         self._build_security()
         self._build_settings()
 
@@ -160,8 +186,12 @@ class MainWindow(QtWidgets.QMainWindow):
         controls = QtWidgets.QHBoxLayout()
         self.case_refresh_btn = QtWidgets.QPushButton("Refresh")
         self.case_close_btn = QtWidgets.QPushButton("Close Case")
+        self.case_timeline_btn = QtWidgets.QPushButton("Timeline")
+        self.case_export_btn = QtWidgets.QPushButton("Forensic Export")
         controls.addWidget(self.case_refresh_btn)
         controls.addWidget(self.case_close_btn)
+        controls.addWidget(self.case_timeline_btn)
+        controls.addWidget(self.case_export_btn)
         controls.addStretch(1)
         layout.addLayout(controls)
 
@@ -177,9 +207,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.case_refresh_btn.clicked.connect(self._load_cases)
         self.case_close_btn.clicked.connect(self._close_selected_case)
+        self.case_timeline_btn.clicked.connect(self._open_timeline)
+        self.case_export_btn.clicked.connect(self._export_case)
         self.case_notes.installEventFilter(self)
 
         self.cases_tab.setLayout(layout)
+
+    def _build_timeline(self):
+        layout = QtWidgets.QVBoxLayout()
+        self.timeline_case_input = QtWidgets.QLineEdit()
+        self.timeline_case_input.setPlaceholderText("Case ID")
+        self.timeline_refresh = QtWidgets.QPushButton("Load Timeline")
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(self.timeline_case_input)
+        top.addWidget(self.timeline_refresh)
+        layout.addLayout(top)
+        self.timeline_table = QtWidgets.QTableWidget(0, 3)
+        self.timeline_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Description"])
+        self.timeline_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.timeline_table)
+        self.timeline_tab.setLayout(layout)
+        self.timeline_refresh.clicked.connect(self._load_timeline_tab)
 
     def _build_customers(self):
         layout = QtWidgets.QVBoxLayout()
@@ -187,7 +235,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.customer_table.setHorizontalHeaderLabels(["Customer", "Country", "PEP", "Annual Income"])
         self.customer_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.customer_table)
+        self.customer_table.itemSelectionChanged.connect(self._load_selected_customer_kyc)
         self.customers_tab.setLayout(layout)
+
+    def _build_kyc(self):
+        layout = QtWidgets.QVBoxLayout()
+        self.kyc_summary = QtWidgets.QLabel("Select a customer to view KYC risk.")
+        self.kyc_table = QtWidgets.QTableWidget(0, 3)
+        self.kyc_table.setHorizontalHeaderLabels(["Dimension", "Score", "Rationale"])
+        self.kyc_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.kyc_summary)
+        layout.addWidget(self.kyc_table)
+        self.kyc_tab.setLayout(layout)
+
+    def _build_network(self):
+        layout = QtWidgets.QVBoxLayout()
+        self.network_view = NetworkView(self.db)
+        refresh_btn = QtWidgets.QPushButton("Refresh Graph")
+        refresh_btn.clicked.connect(self.network_view.refresh)
+        layout.addWidget(refresh_btn)
+        layout.addWidget(self.network_view)
+        self.network_tab.setLayout(layout)
 
     def _build_security(self):
         layout = QtWidgets.QVBoxLayout()
@@ -201,6 +269,14 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QFormLayout()
         self.role_label = QtWidgets.QLabel(self.role)
         layout.addRow("Current role", self.role_label)
+        if self.settings:
+            layout.addRow("Secure mode", QtWidgets.QLabel("ON" if self.settings.secure_mode else "OFF"))
+            layout.addRow("Expected hash", QtWidgets.QLabel(self.settings.expected_exe_hash or "not set"))
+        if self.tamper_warnings:
+            warnings_box = QtWidgets.QTextEdit("\n".join(self.tamper_warnings))
+            warnings_box.setReadOnly(True)
+            warnings_box.setMaximumHeight(120)
+            layout.addRow("Security warnings", warnings_box)
         self.settings_tab.setLayout(layout)
 
     # endregion
@@ -215,6 +291,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_cases()
         self._load_customers()
         self._load_audit()
+        self.network_view.refresh()
 
     def _load_dashboard(self):
         alerts = self.db.list_alerts(limit=200)
@@ -263,6 +340,17 @@ class MainWindow(QtWidgets.QMainWindow):
             for col, value in enumerate(values):
                 self.audit_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
 
+    def _load_timeline_tab(self):
+        case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
+        if not case_id:
+            return
+        events = self.db.case_timeline(case_id)
+        self.timeline_table.setRowCount(len(events))
+        for idx, event in enumerate(events):
+            self.timeline_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(str(event.get("timestamp"))))
+            self.timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event.get("type"))))
+            self.timeline_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(str(event.get("description"))))
+
     def _close_selected_case(self):
         if not validate_role(self.role) or self.role not in {"LEAD", "ADMIN"}:
             QtWidgets.QMessageBox.warning(self, "Access denied", "Only LEAD or ADMIN can close cases.")
@@ -279,6 +367,48 @@ class MainWindow(QtWidgets.QMainWindow):
             self.audit.log(self.username, AuditAction.CASE_NOTE_ADDED.value, target=case_id, details=note_text[:120])
             self.case_notes.clear()
         self.refresh_all()
+
+    def _open_timeline(self):
+        row = self.case_table.currentRow()
+        if row < 0:
+            return
+        case_id = self.case_table.item(row, 0).text()
+        dialog = CaseTimelineDialog(self.db, case_id, self)
+        dialog.exec()
+
+    def _export_case(self):
+        if not self.settings:
+            QtWidgets.QMessageBox.warning(self, "Config", "Settings unavailable for export path.")
+            return
+        row = self.case_table.currentRow()
+        if row < 0:
+            return
+        case_id = self.case_table.item(row, 0).text()
+        try:
+            path, hash_value = export_case_bundle(self.db, case_id, self.settings.exports_dir)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export complete",
+                f"Case exported to {path}\nSHA256: {hash_value}",
+            )
+            self.audit.log(self.username, AuditAction.SETTINGS_CHANGE.value, target=case_id, details="Forensic export")
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
+
+    def _load_selected_customer_kyc(self):
+        row = self.customer_table.currentRow()
+        if row < 0:
+            return
+        customers = make_customers()
+        if row >= len(customers):
+            return
+        profile = evaluate_customer(customers[row])
+        self.kyc_summary.setText(f"Total: {profile.total_score} ({profile.level})")
+        self.kyc_table.setRowCount(len(profile.dimensions))
+        for idx, dim in enumerate(profile.dimensions):
+            self.kyc_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(dim.name))
+            self.kyc_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(dim.score)))
+            self.kyc_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(dim.rationale))
 
     def eventFilter(self, source, event):
         if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.KeyPress}:

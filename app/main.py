@@ -9,6 +9,7 @@ from PySide6 import QtWidgets
 from app.config.settings import SettingsLoader
 from app.security.auth import AuthService
 from app.security.audit import AuditLogger, AuditAction
+from app.security.tamper import verify_executable
 from app.storage.db import Database
 from app.ui.login_dialog import LoginDialog
 from app.ui.main_window import AppBootstrap, MainWindow
@@ -19,6 +20,12 @@ def main() -> None:
     db = Database(settings.db_path)
     auth = AuthService(db)
     audit = AuditLogger(db)
+
+    tamper_result = verify_executable(settings)
+    if not tamper_result.ok:
+        for err in tamper_result.errors:
+            print("[SECURITY]", err)
+        sys.exit(1)
 
     generated_password = auth.bootstrap_admin()
     if generated_password:
@@ -41,7 +48,16 @@ def main() -> None:
 
     bootstrap = AppBootstrap(db)
     engine, thresholds = bootstrap.build_risk_engine()
-    window = MainWindow(db=db, audit=audit, auth=auth, username=username, role=role or "ANALYST", session_timeout_minutes=settings.session_timeout_minutes)
+    window = MainWindow(
+        db=db,
+        audit=audit,
+        auth=auth,
+        username=username,
+        role=role or "ANALYST",
+        session_timeout_minutes=settings.session_timeout_minutes,
+        tamper_warnings=tamper_result.warnings,
+        settings=settings,
+    )
     worker = bootstrap.start_simulation(engine, thresholds)
     window.attach_simulation(worker)
     window.show()

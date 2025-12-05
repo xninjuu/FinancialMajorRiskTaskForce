@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.runtime_paths import resolve_config_path, runtime_dir, ensure_parent_dir
 
@@ -15,6 +15,9 @@ class AppSettings:
     indicators_path: Path
     thresholds_path: Path
     session_timeout_minutes: int = 15
+    secure_mode: bool = False
+    expected_exe_hash: Optional[str] = None
+    exports_dir: Path | None = None
 
 
 class SettingsLoader:
@@ -37,11 +40,16 @@ class SettingsLoader:
         thresholds_path = cls._resolve_file("thresholds.json")
         db_path = Path(os.getenv("CODEX_DB_PATH", runtime_dir() / "codex.db"))
         ensure_parent_dir(db_path)
+        exports_dir = Path(os.getenv("CODEX_EXPORTS_DIR", runtime_dir() / "exports"))
+        ensure_parent_dir(exports_dir)
         return AppSettings(
             db_path=db_path,
             indicators_path=indicators_path,
             thresholds_path=thresholds_path,
             session_timeout_minutes=int(os.getenv("CODEX_SESSION_TIMEOUT_MINUTES", "15")),
+            secure_mode=os.getenv("CODEX_SECURE_MODE", "0") == "1",
+            expected_exe_hash=os.getenv("CODEX_EXPECTED_EXE_HASH"),
+            exports_dir=exports_dir,
         )
 
     @staticmethod

@@ -169,6 +169,66 @@ class Database:
     def recent_transactions(self, *args, **kwargs):
         return self.persistence.recent_transactions(*args, **kwargs)
 
+    def get_transaction(self, tx_id: str):
+        return self.persistence.get_transaction(tx_id)
+
+    def list_transactions(self, *, limit: int = 200):
+        return self.persistence.list_transactions(limit=limit)
+
+    def record_export(self, case_id: str, path: str, hash_value: str) -> None:
+        self.persistence.record_export(case_id, path, hash_value)
+
+    def audit_for_target(self, target: str, *, limit: int = 200):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT timestamp, username, action, target, details FROM audit_log WHERE target = ? ORDER BY datetime(timestamp) ASC LIMIT ?",
+            (target, limit),
+        )
+        return cursor.fetchall()
+
+    def case_timeline(self, case_id: str):
+        events = []
+        alerts = self.alerts_for_case(case_id)
+        for alert in alerts:
+            events.append(
+                {
+                    "timestamp": alert["created_at"],
+                    "type": "Alert",
+                    "description": f"Alert {alert['id']} ({alert['risk_level']})",
+                    "metadata": alert,
+                }
+            )
+            tx = self.get_transaction(alert["transaction_id"])
+            if tx:
+                events.append(
+                    {
+                        "timestamp": tx.timestamp.isoformat(),
+                        "type": "Transaction",
+                        "description": f"Transaction {tx.amount:.2f} {tx.currency} via {tx.channel}",
+                        "metadata": tx,
+                    }
+                )
+        for note in self.case_notes(case_id):
+            events.append(
+                {
+                    "timestamp": note.created_at.isoformat(),
+                    "type": "Note",
+                    "description": f"{note.author}: {note.message}",
+                    "metadata": note,
+                }
+            )
+        for audit_row in self.audit_for_target(case_id):
+            events.append(
+                {
+                    "timestamp": audit_row["timestamp"],
+                    "type": "Audit",
+                    "description": f"{audit_row['action']} by {audit_row['username']}",
+                    "metadata": audit_row,
+                }
+            )
+        events.sort(key=lambda e: e["timestamp"])
+        return events
+
     def attach_note(self, case_id: str, note: CaseNote) -> None:
         row = self.get_case(case_id)
         if not row:

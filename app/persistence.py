@@ -11,7 +11,7 @@ from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
@@ -33,6 +33,7 @@ class PersistenceLayer:
         cursor.execute("DROP TABLE IF EXISTS cases")
         cursor.execute("DROP TABLE IF EXISTS transactions")
         cursor.execute("DROP TABLE IF EXISTS case_notes")
+        cursor.execute("DROP TABLE IF EXISTS forensic_exports")
         cursor.execute(
             """
             CREATE TABLE transactions (
@@ -84,6 +85,17 @@ class PersistenceLayer:
                 case_id TEXT,
                 author TEXT,
                 message TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE forensic_exports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id TEXT,
+                path TEXT,
+                hash TEXT,
                 created_at TEXT
             )
             """
@@ -258,6 +270,29 @@ class PersistenceLayer:
             CaseNote(author=row["author"], message=row["message"], created_at=datetime.fromisoformat(row["created_at"]))
             for row in rows
         ]
+
+    def get_transaction(self, tx_id: str) -> Transaction | None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
+        row = cursor.fetchone()
+        return self._row_to_transaction(row) if row else None
+
+    def list_transactions(self, *, limit: int = 200) -> List[Transaction]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM transactions ORDER BY datetime(timestamp) DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        return [self._row_to_transaction(row) for row in rows]
+
+    def record_export(self, case_id: str, path: str, hash_value: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO forensic_exports (case_id, path, hash, created_at) VALUES (?, ?, ?, ?)",
+            (case_id, path, hash_value, datetime.utcnow().isoformat()),
+        )
+        self.conn.commit()
 
     def _row_to_transaction(self, row: sqlite3.Row) -> Transaction:
         return Transaction(
