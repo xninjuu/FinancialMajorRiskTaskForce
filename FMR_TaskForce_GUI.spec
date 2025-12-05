@@ -4,7 +4,7 @@ import sys
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
-hiddenimports = collect_submodules('app')
+hiddenimports = collect_submodules('app') + ['_cffi_backend']
 
 a = Analysis(
     ['app/main.py'],

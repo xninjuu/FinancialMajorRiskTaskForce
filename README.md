@@ -193,42 +193,39 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 [Dashboard Server (Basic Auth)] -> /alerts, /cases (read-only)
 ```
 
-### Quickstart
-1) Voraussetzungen: Python 3.11+ (Standardbibliothek genügt).
-2) Start der Echtzeit-Simulation:
+### Quickstart (Desktop GUI)
+1) Voraussetzungen: Python 3.11+ und eine aktivierte venv.
+2) Installiere Abhängigkeiten:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3) Starte die GUI lokal:
    ```bash
    python -m app.main
    ```
-   Optionale Umgebungsvariablen:
-   - `CODEX_DB_PATH` (Standard `codex.db`)
-   - `CODEX_DASHBOARD_PORT` (Standard `8000`)
-   - `CODEX_DASHBOARD_USER` (Standard `codex_internal`)
-   - `CODEX_DASHBOARD_PASSWORD_HASH` (SHA256, Standard `f0e6d40e24da418d26dc3a542354a32403f56ac3c86730c6815e4506c5d89e51`)
-   - `CODEX_DASHBOARD_PASSWORD` (überschreibt Hash und nutzt Klartext nur lokal, falls gesetzt)
-3) Abbruch jederzeit via `Ctrl+C`.
+   - Der Login-Dialog erzwingt Benutzer/Passwort (Admin wird bei Erststart angelegt; Passwort via Konsole ausgeben oder per ENV `CODEX_ADMIN_PASSWORD`).
+   - Die GUI läuft offline; es wird **kein** Webserver gestartet.
 4) Tests: `python -m pytest`
 
-### Windows: Einzelne EXE mit PyInstaller
-Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), `pyinstaller` installiert (`pip install pyinstaller`).
+### Windows: Einzelne EXE mit PyInstaller (GUI)
+Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), Abhängigkeiten installiert (`pip install -r requirements.txt`).
 
 1) Build anstoßen (aus dem Repo-Root):
    ```powershell
-   pyinstaller --clean --noconfirm FMR_TaskForce.spec
-   # oder ohne Spec, minimal:
-   # pyinstaller --onefile --name FMR_TaskForce app/main.py --add-data "config/indicators.json;config" --add-data "config/thresholds.json;config"
+   pyinstaller --clean --noconfirm FMR_TaskForce_GUI.spec
    ```
-   Der Build legt `dist/FMR_TaskForce.exe` an.
+   Der Build legt `dist/FMR_TaskForce_GUI.exe` an.
 
-2) Start per Doppelklick oder per `start.bat` (Root des Repos):
+2) Start per Doppelklick oder per `start_gui.bat` (Root des Repos):
    ```bat
-   start.bat
+   start_gui.bat
    ```
    Das Batch-Skript hält das Fenster offen und meldet Fehler klar.
 
 3) Laufzeitpfade:
    - Configs (`indicators.json`, `thresholds.json`) werden aus `config/` neben der EXE oder aus dem eingebetteten Bundle gelesen. Optional kann `CODEX_CONFIG_DIR` gesetzt werden.
    - SQLite-DB: Standard `codex.db` liegt neben der EXE (oder via `CODEX_DB_PATH`).
-   - `CODEX_HOLD_ON_EXIT=0` deaktiviert die Eingabeaufforderung am Ende (für CI).
+   - `CODEX_ADMIN_PASSWORD` kann gesetzt werden, um den initialen Admin-User deterministisch anzulegen; andernfalls wird ein Zufallspasswort in der Konsole ausgegeben.
 
 #### Schritt-für-Schritt (Portfolio-tauglich)
 ```bash
@@ -238,21 +235,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt  # falls vorhanden, sonst pytest installieren
 python -m pytest
 python -m app.main
-# Dashboard (Basic Auth): http://localhost:8000/alerts
-# Cases: http://localhost:8000/cases
 ```
 
-**Demo-Login (Basic Auth, persistent default)**
-- User: `codex_internal`
-- Password: `FMR-TaskForce!2024$Codex`
-- SHA256-Hash (für `.env`): `f0e6d40e24da418d26dc3a542354a32403f56ac3c86730c6815e4506c5d89e51`
-  - Setze `CODEX_DASHBOARD_USER` und `CODEX_DASHBOARD_PASSWORD_HASH` (oder alternativ `CODEX_DASHBOARD_PASSWORD` für reine lokale Tests).
-  - Der Hash wird serverseitig geprüft, sodass das Klartext-Passwort nicht im Prozess verbleibt, sofern `CODEX_DASHBOARD_PASSWORD` **nicht** gesetzt ist.
+**Demo-Login (GUI, Admin-Bootstrap)**
+- User: `admin`
+- Passwort: via ENV `CODEX_ADMIN_PASSWORD` oder zufällig generiert beim ersten Start (wird in der Konsole angezeigt).
+- Nutzerverwaltung liegt in SQLite (`users`-Tabelle). Rollen: ANALYST, LEAD, ADMIN (RBAC erzwingt Zugriffsrechte im UI).
 
 ### Demo-Flow (Story)
 - **Problemstellung**: Near-Realtime AML/TF/Fraud/Tax-Risikoerkennung mit Case-Management-Light.
 - **Scenario Examples**: Structuring/Smurfing, PEP mit Offshore-Layering, NGO-Spenden in Konfliktkorridoren, Dual-Use-Lieferungen, Card-Not-Present-Velocity.
-- **Flow**: Ingestion liefert Szenarien → Risk Engine bewertet Indikatoren (Config-validiert) → High-Risk erzeugt Alerts → Alerts werden Cases zugeordnet (Status OPEN/IN_REVIEW/ESCALATED/CLOSED, Label z.B. SAR_FILED) → Notes und Audit landen in SQLite → Web-Dashboard zeigt gefilterte Alerts/Cases (Basic Auth).
+- **Flow**: Ingestion liefert Szenarien → Risk Engine bewertet Indikatoren (Config-validiert) → High-Risk erzeugt Alerts → Alerts werden Cases zugeordnet (Status OPEN/IN_REVIEW/ESCALATED/CLOSED, Label z.B. SAR_FILED) → Notes und Audit landen in SQLite → Desktop-UI zeigt gefilterte Alerts/Cases mit RBAC.
 
 Die Web-Ansicht ist read-only und lauscht auf Port 8000, solange der Prozess läuft.
 

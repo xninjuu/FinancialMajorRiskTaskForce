@@ -8,8 +8,8 @@ from typing import Dict, List
 from PySide6 import QtCore, QtWidgets
 
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
-from app.domain import Alert, Case, CaseNote, CaseStatus, RiskThresholds, Transaction
-from app.risk_engine import RiskScoringEngine
+from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
+from app.risk_engine import RiskScoringEngine, RiskThresholds
 from app.security.audit import AuditLogger
 from app.security.auth import AuthService
 from app.storage.db import Database
