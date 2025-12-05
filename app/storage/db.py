@@ -33,6 +33,16 @@ class Database:
         )
         cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                username TEXT NOT NULL,
+                pref_key TEXT NOT NULL,
+                pref_value TEXT NOT NULL,
+                PRIMARY KEY (username, pref_key)
+            )
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -53,6 +63,23 @@ class Database:
             cursor.execute("ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0")
         if "locked_until" not in cols:
             cursor.execute("ALTER TABLE users ADD COLUMN locked_until TEXT")
+        self.conn.commit()
+
+    def get_user_pref(self, username: str, pref_key: str, default: str | None = None) -> str | None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT pref_value FROM user_preferences WHERE username = ? AND pref_key = ?",
+            (username, pref_key),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else default
+
+    def set_user_pref(self, username: str, pref_key: str, value: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO user_preferences (username, pref_key, pref_value) VALUES (?, ?, ?)",
+            (username, pref_key, value),
+        )
         self.conn.commit()
 
     def ensure_admin(self, *, password_hash: str | None, generated_password_callback) -> None:
@@ -215,7 +242,7 @@ class Database:
         )
         return cursor.fetchall()
 
-    def case_timeline(self, case_id: str):
+    def case_timeline(self, case_id: str, limit: int | None = None):
         events = []
         alerts = self.alerts_for_case(case_id)
         for alert in alerts:
@@ -224,6 +251,7 @@ class Database:
                     "timestamp": alert["created_at"],
                     "type": "Alert",
                     "description": f"Alert {alert['id']} ({alert['risk_level']})",
+                    "risk_level": alert.get("risk_level"),
                     "metadata": alert,
                 }
             )
@@ -238,24 +266,28 @@ class Database:
                     }
                 )
         for note in self.case_notes(case_id):
-            events.append(
-                {
-                    "timestamp": note.created_at.isoformat(),
-                    "type": "Note",
-                    "description": f"{note.author}: {note.message}",
-                    "metadata": note,
-                }
-            )
+                events.append(
+                    {
+                        "timestamp": note.created_at.isoformat(),
+                        "type": "Note",
+                        "risk_level": None,
+                        "description": f"{note.author}: {note.message}",
+                        "metadata": note,
+                    }
+                )
         for audit_row in self.audit_for_target(case_id):
             events.append(
                 {
                     "timestamp": audit_row["timestamp"],
                     "type": "Audit",
+                    "risk_level": None,
                     "description": f"{audit_row['action']} by {audit_row['username']}",
                     "metadata": audit_row,
                 }
             )
         events.sort(key=lambda e: e["timestamp"])
+        if limit:
+            return events[-limit:]
         return events
 
     def attach_note(self, case_id: str, note: CaseNote) -> None:

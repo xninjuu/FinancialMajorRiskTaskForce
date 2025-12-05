@@ -118,6 +118,13 @@ public class RiskScoringEngine
 ## UI/Design Leitlinien (Schwarz–Rot–Weiß)
 - Dark Anthrazit Hintergrund, Akzent Rot (#E50914), klare Sans-Serif (Segoe UI/Roboto/SF-ähnlich).
 - Layout: Top News-Ticker, linke Navigation (Dashboard, Transactions, Alerts, Cases, Settings), zentrale KPIs, rechte Live-Transaktionsliste mit Farbcodes.
+
+### Desktop-GUI (PySide6) – Phase 2 UX
+- Linke Sidebar-Navigation mit Secure-/Role-Badges in der Kopfzeile und Sicherheits-Footer (Hash/Mode/Role).
+- Table-Density-Profile (Compact/Comfortable/Expanded) je User, Triage-Mode für Alerts, Risiko-Farbbalken und Rich-Cells mit Tags.
+- Resizable, per-User gespeicherte Split-Layouts (Case Workspace) inkl. Toggle für Detail-Panel.
+- Theme-Toggle (Dark/Light) + Font-Scaling-Slider; Einstellbar im Settings-Tab und persistent pro Benutzer.
+- Timeline-Zoom-Slider im Timeline-Tab, farbige Akzentierung nach Risikoniveau, sowie kollabierbare Panels für dichte Ermittlungsansichten.
 - Kartenbasiertes Dashboard, Buttons "Open Case" / "Mark False Positive" in Transaction-Detail.
 
 ### Ausführliches UI-Design (WPF/WinUI)

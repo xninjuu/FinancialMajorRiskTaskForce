@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
 from app.config.settings import AppSettings
@@ -29,11 +29,15 @@ from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offsh
 from app.ui.case_timeline import CaseTimelineDialog
 from app.ui.network_view import NetworkView
 from app.ui.components import (
-    apply_dark_palette,
+    DENSITY_STYLES,
+    SectionCard,
+    apply_table_density,
+    apply_theme,
     create_header_pill,
     create_pill,
+    create_section_header,
+    rich_cell,
     update_pill,
-    SectionCard,
 )
 
 
@@ -138,11 +142,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.baselines = BaselineEngine(db)
         self.correlations = CorrelationEngine(db)
         self.clipboard = SecureClipboard(self)
+        self.base_font = self.font()
+        self.theme = self._load_pref("ui.theme", "dark")
+        self.table_density = self._load_pref("ui.table_density", "Comfortable")
+        self.font_scale = int(self._load_pref("ui.font_scale", "100"))
 
         self.setWindowTitle("FMR TaskForce Codex - Desktop")
         self.resize(1200, 800)
 
-        apply_dark_palette(self)
+        apply_theme(self, self.theme)
+        self._apply_font_scale()
 
         self.container = QtWidgets.QWidget()
         self.setCentralWidget(self.container)
@@ -152,7 +161,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.nav_list = QtWidgets.QListWidget()
         self.nav_list.setFixedWidth(220)
         self.nav_list.setObjectName("navList")
-        self.nav_list.setStyleSheet("QListWidget#navList { background:#1b1d23; color:#e5e7eb; border-right:1px solid #2c2f36; }")
+        self.nav_list.setStyleSheet(
+            "QListWidget#navList { background:#1b1d23; color:#e5e7eb; border-right:1px solid #2c2f36; }"
+        )
         root_layout.addWidget(self.nav_list)
 
         content_column = QtWidgets.QVBoxLayout()
@@ -185,6 +196,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.nav_list.addItem(title)
             self.content_stack.addWidget(widget)
 
+        self._apply_table_density_all()
+        self._build_status_bar()
+
         self.nav_list.currentRowChanged.connect(self.content_stack.setCurrentIndex)
         self.nav_list.setCurrentRow(0)
 
@@ -197,6 +211,71 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_timer.start(5_000)
 
         self.installEventFilter(self)
+
+    def _build_status_bar(self) -> None:
+        bar = QtWidgets.QStatusBar()
+        self.setStatusBar(bar)
+        secure_state = "Secure" if self.settings and self.settings.secure_mode else "Standard"
+        self.status_secure = QtWidgets.QLabel(f"Mode: {secure_state}")
+        self.status_role = QtWidgets.QLabel(f"Role: {self.role}")
+        expected = self.settings.expected_exe_hash if self.settings else None
+        self.status_hash = QtWidgets.QLabel(f"Hash: {expected or 'n/a'}")
+        bar.addPermanentWidget(self.status_secure)
+        bar.addPermanentWidget(self.status_role)
+        bar.addPermanentWidget(self.status_hash)
+
+    def _apply_font_scale(self) -> None:
+        font = QtGui.QFont(self.base_font)
+        font.setPointSizeF(font.pointSizeF() * (self.font_scale / 100))
+        self.setFont(font)
+
+    def _apply_table_density_all(self) -> None:
+        tables = [
+            getattr(self, name)
+            for name in [
+                "alert_table",
+                "case_table",
+                "case_timeline_table",
+                "case_alerts_table",
+                "customer_table",
+                "kyc_table",
+                "evidence_table",
+                "cluster_table",
+                "actor_table",
+                "audit_table",
+                "timeline_table",
+            ]
+            if hasattr(self, name)
+        ]
+        for table in tables:
+            apply_table_density(table, self.table_density)
+
+    def _change_theme(self, theme: str) -> None:
+        self.theme = theme
+        self._save_pref("ui.theme", theme)
+        apply_theme(self, theme)
+
+    def _change_font_scale(self, value: int) -> None:
+        self.font_scale = value
+        self._save_pref("ui.font_scale", str(value))
+        self._apply_font_scale()
+
+    def _change_density(self, mode: str) -> None:
+        self.table_density = mode
+        self._save_pref("ui.table_density", mode)
+        self._apply_table_density_all()
+
+    def _save_pref(self, key: str, value: str) -> None:
+        try:
+            self.db.set_user_pref(self.username, key, value)
+        except Exception:
+            return
+
+    def _load_pref(self, key: str, default: str) -> str:
+        try:
+            return self.db.get_user_pref(self.username, key, default) or default
+        except Exception:
+            return default
 
     def _build_header_bar(self) -> QtWidgets.QWidget:
         bar = SectionCard()
@@ -243,51 +322,67 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_alerts(self) -> QtWidgets.QWidget:
         page = SectionCard()
         layout = QtWidgets.QVBoxLayout(page)
+        layout.addWidget(create_section_header("Alert Triage", accent="#21d4fd"))
         controls = QtWidgets.QHBoxLayout()
         self.alert_refresh_btn = QtWidgets.QPushButton("Refresh")
+        self.alert_triage_toggle = QtWidgets.QCheckBox("Triage Mode")
+        self.alert_density_combo = QtWidgets.QComboBox()
+        self.alert_density_combo.addItems(DENSITY_STYLES.keys())
+        self.alert_density_combo.setCurrentText(self.table_density)
         controls.addWidget(self.alert_refresh_btn)
+        controls.addWidget(self.alert_triage_toggle)
+        controls.addWidget(QtWidgets.QLabel("Density"))
+        controls.addWidget(self.alert_density_combo)
         controls.addStretch(1)
         layout.addLayout(controls)
 
         self.alert_table = QtWidgets.QTableWidget(0, 6)
         self.alert_table.setHorizontalHeaderLabels(["Created", "Account", "Score", "Level", "Domain", "Case"])
         self.alert_table.horizontalHeader().setStretchLastSection(True)
+        self.alert_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         layout.addWidget(self.alert_table)
 
         self.alert_refresh_btn.clicked.connect(self._load_alerts)
+        self.alert_density_combo.currentTextChanged.connect(self._change_density)
+        self.alert_triage_toggle.toggled.connect(self._toggle_triage_mode)
         return page
 
     def _build_cases(self) -> QtWidgets.QWidget:
         page = SectionCard()
         outer = QtWidgets.QVBoxLayout(page)
+        outer.addWidget(create_section_header("Case Workspace", accent="#21d4fd"))
 
         controls = QtWidgets.QHBoxLayout()
         self.case_refresh_btn = QtWidgets.QPushButton("Refresh")
         self.case_close_btn = QtWidgets.QPushButton("Close Case")
         self.case_timeline_btn = QtWidgets.QPushButton("Open Timeline")
         self.case_export_btn = QtWidgets.QPushButton("Forensic Export")
+        self.case_panel_toggle = QtWidgets.QPushButton("Toggle Details")
         controls.addWidget(self.case_refresh_btn)
         controls.addWidget(self.case_close_btn)
         controls.addWidget(self.case_timeline_btn)
         controls.addWidget(self.case_export_btn)
+        controls.addWidget(self.case_panel_toggle)
         controls.addStretch(1)
         outer.addLayout(controls)
 
         splitter = QtWidgets.QSplitter()
-        splitter.setHandleWidth(4)
+        splitter.setHandleWidth(6)
+        self.case_splitter = splitter
 
         left_panel = SectionCard()
         left_layout = QtWidgets.QVBoxLayout(left_panel)
+        left_layout.addWidget(create_section_header("Cases", accent="#8ab4f8"))
         self.case_table = QtWidgets.QTableWidget(0, 5)
         self.case_table.setHorizontalHeaderLabels(["Case ID", "Status", "Priority", "Created", "Updated"])
         self.case_table.horizontalHeader().setStretchLastSection(True)
-        left_layout.addWidget(QtWidgets.QLabel("Cases"))
+        self.case_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         left_layout.addWidget(self.case_table)
 
+        left_layout.addWidget(create_section_header("Case Timeline", accent="#f7a400"))
         self.case_timeline_table = QtWidgets.QTableWidget(0, 3)
         self.case_timeline_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Summary"])
         self.case_timeline_table.horizontalHeader().setStretchLastSection(True)
-        left_layout.addWidget(QtWidgets.QLabel("Case Timeline"))
         left_layout.addWidget(self.case_timeline_table)
 
         splitter.addWidget(left_panel)
@@ -303,16 +398,17 @@ class MainWindow(QtWidgets.QMainWindow):
         header_row.addWidget(self.case_status_pill)
         right_layout.addLayout(header_row)
 
+        right_layout.addWidget(create_section_header("Related Alerts", accent="#ef4444"))
         self.case_alerts_table = QtWidgets.QTableWidget(0, 4)
         self.case_alerts_table.setHorizontalHeaderLabels(["Alert", "Score", "Level", "Domain"])
         self.case_alerts_table.horizontalHeader().setStretchLastSection(True)
-        right_layout.addWidget(QtWidgets.QLabel("Related Alerts"))
+        self.case_alerts_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         right_layout.addWidget(self.case_alerts_table)
 
+        right_layout.addWidget(create_section_header("Case Narrative & Notes", accent="#8ab4f8"))
         self.case_notes = QtWidgets.QTextEdit()
         self.case_notes.setPlaceholderText("Add note (ENTER to save)")
-        self.case_notes.setMaximumHeight(120)
-        right_layout.addWidget(QtWidgets.QLabel("Case Narrative & Notes"))
+        self.case_notes.setMaximumHeight(140)
         right_layout.addWidget(self.case_notes)
 
         splitter.addWidget(right_panel)
@@ -324,8 +420,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_close_btn.clicked.connect(self._close_selected_case)
         self.case_timeline_btn.clicked.connect(self._open_timeline)
         self.case_export_btn.clicked.connect(self._export_case)
+        self.case_panel_toggle.clicked.connect(self._toggle_case_detail_panel)
         self.case_notes.installEventFilter(self)
         self.case_table.itemSelectionChanged.connect(self._load_case_details)
+        splitter.splitterMoved.connect(self._persist_case_split)
+        self._restore_case_split()
 
         return page
 
@@ -335,15 +434,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline_case_input = QtWidgets.QLineEdit()
         self.timeline_case_input.setPlaceholderText("Case ID")
         self.timeline_refresh = QtWidgets.QPushButton("Load Timeline")
+        self.timeline_zoom = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.timeline_zoom.setRange(10, 200)
+        self.timeline_zoom.setValue(50)
         top = QtWidgets.QHBoxLayout()
         top.addWidget(self.timeline_case_input)
         top.addWidget(self.timeline_refresh)
+        top.addWidget(QtWidgets.QLabel("Events"))
+        top.addWidget(self.timeline_zoom)
         layout.addLayout(top)
         self.timeline_table = QtWidgets.QTableWidget(0, 3)
         self.timeline_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Description"])
         self.timeline_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.timeline_table)
         self.timeline_refresh.clicked.connect(self._load_timeline_tab)
+        self.timeline_zoom.valueChanged.connect(self._load_timeline_tab)
         return page
 
     def _build_customers(self) -> QtWidgets.QWidget:
@@ -459,6 +564,21 @@ class MainWindow(QtWidgets.QMainWindow):
             warnings_box.setReadOnly(True)
             warnings_box.setMaximumHeight(120)
             layout.addRow("Security warnings", warnings_box)
+        self.theme_combo = QtWidgets.QComboBox()
+        self.theme_combo.addItems(["dark", "light"])
+        self.theme_combo.setCurrentText(self.theme)
+        layout.addRow("Theme", self.theme_combo)
+        self.font_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.font_slider.setRange(80, 120)
+        self.font_slider.setValue(self.font_scale)
+        layout.addRow("Font scale (%)", self.font_slider)
+        self.density_combo = QtWidgets.QComboBox()
+        self.density_combo.addItems(DENSITY_STYLES.keys())
+        self.density_combo.setCurrentText(self.table_density)
+        layout.addRow("Table density", self.density_combo)
+        self.theme_combo.currentTextChanged.connect(self._change_theme)
+        self.font_slider.valueChanged.connect(self._change_font_scale)
+        self.density_combo.currentTextChanged.connect(self._change_density)
         return page
 
     # endregion
@@ -490,21 +610,26 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = self.db.list_alerts(limit=200)
         self.alert_table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
-            values = [
-                row["created_at"],
-                row["transaction_id"],
-                f"{row['score']:.1f}",
-                "",  # pill placeholder
-                row["domain"],
-                row["case_id"] or "",
+            risk_color = self._risk_color(row["risk_level"])
+            cells = [
+                rich_cell(row["created_at"], accent_color=risk_color),
+                rich_cell(row["transaction_id"], accent_color=None),
+                rich_cell(f"{row['score']:.1f}", accent_color=risk_color),
+                create_pill(row["risk_level"], self._risk_state(row["risk_level"])),
+                rich_cell(row["domain"], accent_color=None, tags=[row["domain"]]),
+                rich_cell(row["case_id"] or "", accent_color=None),
             ]
-            for col, value in enumerate(values):
-                if col == 3:
-                    self.alert_table.setCellWidget(
-                        idx, col, create_pill(row["risk_level"], self._risk_state(row["risk_level"]))
-                    )
+            for col, value in enumerate(cells):
+                if isinstance(value, QtWidgets.QWidget):
+                    self.alert_table.setCellWidget(idx, col, value)
                 else:
                     self.alert_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        apply_table_density(self.alert_table, self.table_density)
+
+    def _toggle_triage_mode(self, checked: bool) -> None:
+        mode = "Compact" if checked else self.table_density
+        self.alert_table.setAlternatingRowColors(checked)
+        apply_table_density(self.alert_table, mode)
 
     def _load_cases(self):
         rows = self.db.list_cases()
@@ -516,10 +641,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 if pill_state:
                     self.case_table.setCellWidget(idx, col, create_pill(str(value), pill_state))
                 else:
-                    self.case_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                    accent = self._risk_color("High" if row["status"] == "ESCALATED" else "Medium") if col == 0 else None
+                    self.case_table.setCellWidget(idx, col, rich_cell(str(value), accent_color=accent))
         if rows:
             self.case_table.selectRow(0)
             self._load_case_details()
+        apply_table_density(self.case_table, self.table_density)
+
+    def _toggle_case_detail_panel(self) -> None:
+        if not hasattr(self, "case_splitter"):
+            return
+        detail = self.case_splitter.widget(1)
+        detail.setVisible(not detail.isVisible())
+        self._save_pref("ui.case_detail_visible", "1" if detail.isVisible() else "0")
+        if detail.isVisible():
+            self._restore_case_split()
+
+    def _persist_case_split(self) -> None:
+        if not hasattr(self, "case_splitter"):
+            return
+        sizes = self.case_splitter.sizes()
+        self._save_pref("ui.case_split_sizes", ",".join(str(s) for s in sizes))
+
+    def _restore_case_split(self) -> None:
+        pref = self._load_pref("ui.case_split_sizes", "")
+        if pref and hasattr(self, "case_splitter"):
+            try:
+                sizes = [int(val) for val in pref.split(",") if val]
+                if sizes:
+                    self.case_splitter.setSizes(sizes)
+            except Exception:
+                pass
+        visible = self._load_pref("ui.case_detail_visible", "1") == "1"
+        self.case_splitter.widget(1).setVisible(visible)
 
     def _load_customers(self):
         customers = make_customers()
@@ -557,6 +711,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(f"{alert['score']:.1f}"))
             self.case_alerts_table.setCellWidget(idx, 2, create_pill(level, self._risk_state(level)))
             self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(alert.get("domain") or ""))
+
+    def _risk_color(self, level: str) -> str:
+        return {"High": "#ef4444", "Medium": "#f7a400", "Low": "#10b981"}.get(level, "#4b5563")
 
     def _risk_state(self, level: str) -> str:
         mapping = {"High": "alert", "Medium": "warning", "Low": "success"}
@@ -627,12 +784,14 @@ class MainWindow(QtWidgets.QMainWindow):
         case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
         if not case_id:
             return
-        events = self.db.case_timeline(case_id)
+        limit = max(5, int(self.timeline_zoom.value()))
+        events = self.db.case_timeline(case_id, limit=limit)
         self.timeline_table.setRowCount(len(events))
         for idx, event in enumerate(events):
-            self.timeline_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(str(event.get("timestamp"))))
+            accent = self._risk_color(event.get("risk_level") or "")
+            self.timeline_table.setCellWidget(idx, 0, rich_cell(str(event.get("timestamp")), accent_color=accent))
             self.timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event.get("type"))))
-            self.timeline_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(str(event.get("description"))))
+            self.timeline_table.setCellWidget(idx, 2, rich_cell(str(event.get("description")), accent_color=None))
 
     def _close_selected_case(self):
         if not validate_role(self.role) or self.role not in {"LEAD", "ADMIN"}:
@@ -765,17 +924,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.warning(self, "Locked", "Application locked. Close and restart if you cannot log in.")
                 continue
             username, password = dialog.credentials()
-                ok, role, message = self.auth.authenticate(username, password)
-                if ok:
-                    self.username = username
-                    self.role = role or self.role
-                    self.last_activity = datetime.utcnow()
-                    self.audit.log(username, "LOGIN_SUCCESS", details="Unlocked session")
-                    self.role_label.setText(self.role)
-                    update_pill(self.role_badge, self.role, "info")
-                    break
-                dialog.show_error(message or "Invalid credentials")
-                self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
+            ok, role, message = self.auth.authenticate(username, password)
+            if ok:
+                self.username = username
+                self.role = role or self.role
+                self.last_activity = datetime.utcnow()
+                self.audit.log(username, "LOGIN_SUCCESS", details="Unlocked session")
+                self.role_label.setText(self.role)
+                update_pill(self.role_badge, self.role, "info")
+                break
+            dialog.show_error(message or "Invalid credentials")
+            self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
 
 
 class AppBootstrap:

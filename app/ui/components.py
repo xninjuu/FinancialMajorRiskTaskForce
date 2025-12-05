@@ -2,6 +2,25 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+THEME_TOKENS = {
+    "dark": {
+        "bg": "#1b1d23",
+        "card": "#23262d",
+        "border": "#2c2f36",
+        "accent": "#21d4fd",
+        "text": "#e5e7eb",
+        "muted": "#9ca3af",
+    },
+    "light": {
+        "bg": "#f7f8fb",
+        "card": "#ffffff",
+        "border": "#d1d5db",
+        "accent": "#2563eb",
+        "text": "#111827",
+        "muted": "#4b5563",
+    },
+}
+
 PILL_COLORS = {
     "alert": "#ef4444",
     "warning": "#f7a400",
@@ -11,29 +30,30 @@ PILL_COLORS = {
 }
 
 
-def apply_dark_palette(widget: QtWidgets.QWidget) -> None:
-    base_style = """
-    QWidget { background-color: #1b1d23; color: #e5e7eb; }
-    QLineEdit, QTextEdit, QTableWidget, QListWidget, QComboBox {
-        background-color: #23262d;
-        border: 1px solid #2f3340;
+def apply_theme(widget: QtWidgets.QWidget, theme: str = "dark") -> None:
+    tokens = THEME_TOKENS.get(theme, THEME_TOKENS["dark"])
+    base_style = f"""
+    QWidget {{ background-color: {tokens['bg']}; color: {tokens['text']}; }}
+    QLineEdit, QTextEdit, QTableWidget, QListWidget, QComboBox {{
+        background-color: {tokens['card']};
+        border: 1px solid {tokens['border']};
         border-radius: 6px;
         padding: 6px;
-    }
-    QTableWidget::item { padding: 4px; }
-    QPushButton {
-        background-color: #23262d;
-        border: 1px solid #2f3340;
+    }}
+    QTableWidget::item {{ padding: 6px; }}
+    QPushButton {{
+        background-color: {tokens['card']};
+        border: 1px solid {tokens['border']};
         border-radius: 8px;
         padding: 8px 12px;
-    }
-    QPushButton:hover { border-color: #21d4fd; }
-    QHeaderView::section {
-        background-color: #23262d;
-        padding: 6px;
+    }}
+    QPushButton:hover {{ border-color: {tokens['accent']}; }}
+    QHeaderView::section {{
+        background-color: {tokens['card']};
+        padding: 8px;
         border: 0px;
-    }
-    QScrollBar:vertical { background: #1b1d23; width: 12px; }
+    }}
+    QScrollBar:vertical {{ background: {tokens['bg']}; width: 12px; }}
     """
     widget.setStyleSheet(base_style)
 
@@ -63,6 +83,21 @@ def create_header_pill(text: str, state: str = "info") -> QtWidgets.QLabel:
     return label
 
 
+def create_section_header(text: str, *, accent: str = "#21d4fd", icon: QtGui.QIcon | None = None) -> QtWidgets.QWidget:
+    wrapper = QtWidgets.QWidget()
+    layout = QtWidgets.QHBoxLayout(wrapper)
+    layout.setContentsMargins(0, 0, 0, 6)
+    if icon:
+        icon_label = QtWidgets.QLabel()
+        icon_label.setPixmap(icon.pixmap(18, 18))
+        layout.addWidget(icon_label)
+    label = QtWidgets.QLabel(text)
+    label.setStyleSheet(f"font-weight:700; font-size:15px; border-bottom: 2px solid {accent}; padding-bottom: 4px;")
+    layout.addWidget(label)
+    layout.addStretch(1)
+    return wrapper
+
+
 class SectionCard(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None):
         super().__init__(parent)
@@ -70,4 +105,44 @@ class SectionCard(QtWidgets.QWidget):
         self.setStyleSheet(
             "QWidget#sectionCard { background-color: #23262d; border: 1px solid #2c2f36; border-radius: 10px; }"
         )
+
+
+DENSITY_STYLES = {
+    "Compact": {"row_height": 22, "padding": "2px 4px", "font": "12px"},
+    "Comfortable": {"row_height": 28, "padding": "6px", "font": "13px"},
+    "Expanded": {"row_height": 34, "padding": "10px 8px", "font": "14px"},
+}
+
+
+def apply_table_density(table: QtWidgets.QTableWidget, mode: str = "Comfortable") -> None:
+    style = DENSITY_STYLES.get(mode, DENSITY_STYLES["Comfortable"])
+    table.setStyleSheet(
+        f"QTableWidget::item {{ padding: {style['padding']}; font-size: {style['font']}; }}"
+        f"QHeaderView::section {{ padding: {style['padding']}; font-size: {style['font']}; }}"
+    )
+    for row in range(table.rowCount()):
+        table.setRowHeight(row, style["row_height"])
+
+
+def rich_cell(text: str, *, accent_color: str | None = None, tags: list[str] | None = None) -> QtWidgets.QWidget:
+    wrapper = QtWidgets.QWidget()
+    layout = QtWidgets.QHBoxLayout(wrapper)
+    layout.setContentsMargins(0, 0, 0, 0)
+    if accent_color:
+        accent = QtWidgets.QFrame()
+        accent.setFixedWidth(6)
+        accent.setStyleSheet(f"background:{accent_color}; border-radius: 3px;")
+        layout.addWidget(accent)
+    label = QtWidgets.QLabel(text)
+    label.setWordWrap(True)
+    layout.addWidget(label, 1)
+    if tags:
+        tags_layout = QtWidgets.QHBoxLayout()
+        tags_layout.setSpacing(4)
+        for tag in tags:
+            tag_lbl = create_pill(tag, "neutral")
+            tag_lbl.setFixedHeight(18)
+            tags_layout.addWidget(tag_lbl)
+        layout.addLayout(tags_layout)
+    return wrapper
 
