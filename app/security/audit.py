@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
+from app.core.validation import coerce_limit
 from app.storage.db import Database
 
 
@@ -22,4 +23,5 @@ class AuditLogger:
         self.db.record_audit(username=username, action=action, target=target, details=details)
 
     def recent(self, limit: int = 200):
-        return self.db.fetch_audit(limit=limit)
+        safe_limit = coerce_limit(limit)
+        return self.db.fetch_audit(limit=safe_limit)

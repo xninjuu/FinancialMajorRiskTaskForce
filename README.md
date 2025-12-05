@@ -305,3 +305,5 @@ Beim Start erscheinen im Terminal:
 ### Compliance & Privacy
 - See `SECURITY.md` for OWASP-aligned practices and `SECURITY_TODO.md` for the open hardening backlog.
 - See `docs/legal_context.md` for DSGVO/GwG/FATF pointers and expected retention/archival considerations.
+- See `docs/threat_model_de.md` for das aktuelle Threat-Model (Schutzziele, Akteure, Gegenmaßnahmen).
+- See `docs/backup_strategy_de.md` für eine minimale Backup-/Restore-Strategie inkl. Hash-Prüfungen.

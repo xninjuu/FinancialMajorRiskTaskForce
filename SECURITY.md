@@ -10,4 +10,4 @@ This prototype follows the OWASP Secure Coding Practices as a baseline. Key poin
 - **Data at rest:** SQLite is the default; for higher assurance use SQLCipher or field-level encryption and restrict NTFS permissions.
 - **Updates:** Only install signed/verified executables from trusted sources; never auto-fetch code at runtime.
 
-See `SECURITY_TODO.md` for the hardening backlog and `docs/legal_context.md` for privacy/regulatory context.
+See `SECURITY_TODO.md` for the hardening backlog, `docs/threat_model_de.md` for the current threat model, `docs/backup_strategy_de.md` for backup/restore guidance, and `docs/legal_context.md` for privacy/regulatory context.

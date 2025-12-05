@@ -10,7 +10,7 @@ from PySide6 import QtCore, QtWidgets
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
 from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
-from app.core.validation import sanitize_text
+from app.core.validation import sanitize_text, validate_role
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
@@ -264,7 +264,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.audit_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
 
     def _close_selected_case(self):
-        if self.role not in {"LEAD", "ADMIN"}:
+        if not validate_role(self.role) or self.role not in {"LEAD", "ADMIN"}:
             QtWidgets.QMessageBox.warning(self, "Access denied", "Only LEAD or ADMIN can close cases.")
             return
         row = self.case_table.currentRow()

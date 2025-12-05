@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.core.validation import sanitize_text, validate_role
 from app.domain import CaseNote, Transaction
-from app.core.validation import sanitize_text
 from app.persistence import PersistenceLayer
 
 
@@ -78,10 +78,13 @@ class Database:
         row = cursor.fetchone()
         if not row:
             return None
+        role = row[2]
+        if not validate_role(role):
+            return None
         return {
             "username": row[0],
             "password_hash": row[1],
-            "role": row[2],
+            "role": role,
             "failed_attempts": row[3],
             "locked_until": row[4],
         }
@@ -192,6 +195,8 @@ class Database:
             return
         from app.domain import Case, CaseStatus, CaseLabel
 
+        if status not in CaseStatus.__members__:
+            return
         notes = self.case_notes(case_id)
         case = Case(
             id=case_id,

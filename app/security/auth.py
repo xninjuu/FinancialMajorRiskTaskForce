@@ -6,8 +6,8 @@ from typing import Optional, Tuple
 
 import bcrypt
 
+from app.core.validation import validate_password_policy, validate_role, validate_username
 from app.storage.db import Database
-from app.core.validation import validate_password_policy, validate_username
 
 
 class AuthService:
@@ -63,6 +63,8 @@ class AuthService:
                     return False, None, f"Account locked until {until_dt.isoformat()}"
             except ValueError:
                 pass
+        if not validate_role(user.get("role", "")):
+            return False, None, "User role invalid"
         if self.verify_password(password, user["password_hash"]):
             self.db.record_login_success(username)
             return True, user["role"], None
