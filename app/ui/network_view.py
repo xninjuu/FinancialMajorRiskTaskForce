@@ -41,8 +41,13 @@ class NetworkView(QtWidgets.QGraphicsView):
             if row == 0:
                 y_offset += 20
         correlation_total = 0
+        confidence_sum = 0.0
         for alert_row in self.db.list_alerts(limit=50):
-            correlation_total += len(self.db.list_correlations(alert_row["id"]))
-        summary = scene.addText(f"Correlations recorded: {correlation_total}")
+            rows = self.db.list_correlations(alert_row["id"])
+            correlation_total += len(rows)
+            for row in rows:
+                confidence_sum += row["confidence"] if "confidence" in row.keys() and row["confidence"] else 0
+        avg_conf = (confidence_sum / correlation_total) if correlation_total else 0
+        summary = scene.addText(f"Correlations recorded: {correlation_total} | avg confidence {avg_conf:.2f}")
         summary.setPos(20, y_offset + (row + 1) * 70)
         scene.setSceneRect(scene.itemsBoundingRect())

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Tuple
+from typing import Iterable, Tuple
+
+try:
+    import pytesseract  # type: ignore
+    from PIL import Image  # type: ignore
+except Exception:  # noqa: BLE001
+    pytesseract = None
+    Image = None
 
 from app.storage.db import Database
 from app.core.validation import sanitize_text
@@ -16,7 +23,16 @@ def hash_file(path: Path) -> str:
     return sha.hexdigest()
 
 
-def add_evidence(db: Database, case_id: str, file_path: Path, added_by: str) -> Tuple[str, str]:
+def add_evidence(
+    db: Database,
+    case_id: str,
+    file_path: Path,
+    added_by: str,
+    *,
+    evidence_type: str | None = None,
+    tags: Iterable[str] | None = None,
+    importance: str | None = None,
+) -> Tuple[str, str]:
     sanitized_case = sanitize_text(case_id, max_length=128)
     if not sanitized_case:
         raise ValueError("Case ID required")
@@ -24,7 +40,26 @@ def add_evidence(db: Database, case_id: str, file_path: Path, added_by: str) -> 
     if not file_path.exists():
         raise FileNotFoundError(f"Evidence file not found: {file_path}")
     digest = hash_file(file_path)
-    db.record_evidence(sanitized_case, file_path.name, digest, added_by=added_by, sealed=False)
+    tag_string = ",".join(sorted({sanitize_text(tag, max_length=32) for tag in tags})) if tags else None
+    preview_path = None
+    ocr_text = None
+    if Image and pytesseract and file_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}:
+        try:
+            ocr_text = pytesseract.image_to_string(Image.open(file_path))
+        except Exception:  # noqa: BLE001
+            ocr_text = None
+    db.record_evidence(
+        sanitized_case,
+        file_path.name,
+        digest,
+        added_by=added_by,
+        sealed=False,
+        evidence_type=evidence_type or "document",
+        tags=tag_string,
+        importance=importance or "medium",
+        preview_path=preview_path,
+        ocr_text=ocr_text,
+    )
     return file_path.name, digest
 
 

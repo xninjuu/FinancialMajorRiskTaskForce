@@ -23,10 +23,35 @@ class CorrelationEngine:
                     edges[source.id].append(target.id)
                     edges[target.id].append(source.id)
                     reason = "Shared account linkage"
-                    self.db.record_correlation(source.id, target.id, reason)
-                    self.db.record_correlation(target.id, source.id, reason)
+                    token = "shared_destination"
+                    confidence = 0.6
+                    if abs(source.score - target.score) < 5:
+                        confidence += 0.1
+                    self.db.record_correlation(
+                        source.id,
+                        target.id,
+                        reason,
+                        confidence=confidence,
+                        reason_token=token,
+                    )
+                    self.db.record_correlation(
+                        target.id,
+                        source.id,
+                        reason,
+                        confidence=confidence,
+                        reason_token=token,
+                    )
         return edges
 
     def correlated_for(self, alert_id: str):
         rows = self.db.list_correlations(alert_id)
-        return [dict(related_id=row["related_id"], reason=row["reason"], created_at=row["created_at"]) for row in rows]
+        return [
+            dict(
+                related_id=row["related_id"],
+                reason=row["reason"],
+                created_at=row["created_at"],
+                confidence=row["confidence"] if "confidence" in row.keys() else None,
+                reason_token=row["reason_token"] if "reason_token" in row.keys() else None,
+            )
+            for row in rows
+        ]

@@ -16,7 +16,7 @@ from app.core.event_correlation import CorrelationEngine
 from app.core.export_bridge import export_case_json
 from app.core.exporter import export_case_bundle
 from app.core.kyc_risk import evaluate_customer
-from app.core.sealed_case import seal_case
+from app.core.sealed_case import seal_case, verify_seal
 from app.core.secure_clipboard import SecureClipboard
 from app.core.validation import sanitize_text, validate_role
 from app.core.evidence_locker import add_evidence, list_evidence
@@ -198,6 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._apply_table_density_all()
         self._build_status_bar()
+        self._register_shortcuts()
 
         self.nav_list.currentRowChanged.connect(self.content_stack.setCurrentIndex)
         self.nav_list.setCurrentRow(0)
@@ -358,11 +359,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_timeline_btn = QtWidgets.QPushButton("Open Timeline")
         self.case_export_btn = QtWidgets.QPushButton("Forensic Export")
         self.case_panel_toggle = QtWidgets.QPushButton("Toggle Details")
+        self.case_redacted = QtWidgets.QCheckBox("Redacted")
+        self.case_watermark = QtWidgets.QLineEdit()
+        self.case_watermark.setPlaceholderText("Watermark")
         controls.addWidget(self.case_refresh_btn)
         controls.addWidget(self.case_close_btn)
         controls.addWidget(self.case_timeline_btn)
         controls.addWidget(self.case_export_btn)
         controls.addWidget(self.case_panel_toggle)
+        controls.addWidget(self.case_redacted)
+        controls.addWidget(self.case_watermark)
         controls.addStretch(1)
         outer.addLayout(controls)
 
@@ -478,18 +484,45 @@ class MainWindow(QtWidgets.QMainWindow):
         controls = QtWidgets.QHBoxLayout()
         self.evidence_case_input = QtWidgets.QLineEdit()
         self.evidence_case_input.setPlaceholderText("Case ID")
+        self.evidence_type = QtWidgets.QComboBox()
+        self.evidence_type.addItems(["document", "screenshot", "note", "export"])
+        self.evidence_tags = QtWidgets.QLineEdit()
+        self.evidence_tags.setPlaceholderText("tags (comma separated)")
+        self.evidence_importance = QtWidgets.QComboBox()
+        self.evidence_importance.addItems(["low", "medium", "high"])
         self.evidence_add_btn = QtWidgets.QPushButton("Add Evidence")
         self.evidence_seal_btn = QtWidgets.QPushButton("Seal Case")
+        self.evidence_verify_btn = QtWidgets.QPushButton("Verify Seal")
+        self.evidence_seal_reason = QtWidgets.QComboBox()
+        self.evidence_seal_reason.addItems(["closure", "legal_hold", "regulatory_export"])
         controls.addWidget(self.evidence_case_input)
+        controls.addWidget(self.evidence_type)
+        controls.addWidget(self.evidence_importance)
+        controls.addWidget(self.evidence_tags)
+        controls.addWidget(self.evidence_seal_reason)
         controls.addWidget(self.evidence_add_btn)
         controls.addWidget(self.evidence_seal_btn)
+        controls.addWidget(self.evidence_verify_btn)
         layout.addLayout(controls)
-        self.evidence_table = QtWidgets.QTableWidget(0, 5)
-        self.evidence_table.setHorizontalHeaderLabels(["File", "Hash", "Added By", "Sealed", "Created"])
+        self.evidence_table = QtWidgets.QTableWidget(0, 9)
+        self.evidence_table.setHorizontalHeaderLabels(
+            [
+                "File",
+                "Hash",
+                "Added By",
+                "Sealed",
+                "Created",
+                "Type",
+                "Tags",
+                "Importance",
+                "OCR",
+            ]
+        )
         self.evidence_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.evidence_table)
         self.evidence_add_btn.clicked.connect(self._add_evidence)
         self.evidence_seal_btn.clicked.connect(self._seal_case)
+        self.evidence_verify_btn.clicked.connect(self._verify_seal)
         return page
 
     def _build_compare(self) -> QtWidgets.QWidget:
@@ -776,7 +809,17 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = list_evidence(self.db, case_id)
         self.evidence_table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
-            values = [row["filename"], row["hash"], row["added_by"], "Yes" if row["sealed"] else "No", row["created_at"]]
+            values = [
+                row["filename"],
+                row["hash"],
+                row["added_by"],
+                "Yes" if row["sealed"] else "No",
+                row["created_at"],
+                row["evidence_type"] if "evidence_type" in row.keys() else None,
+                row["tags"] if "tags" in row.keys() else None,
+                row["importance"] if "importance" in row.keys() else None,
+                "yes" if (row["ocr_text"] if "ocr_text" in row.keys() else None) else "no",
+            ]
             for col, value in enumerate(values):
                 self.evidence_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
 
@@ -827,7 +870,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         case_id = self.case_table.item(row, 0).text()
         try:
-            path, hash_value = export_case_bundle(self.db, case_id, self.settings.exports_dir)
+            redacted = self.case_redacted.isChecked()
+            watermark = sanitize_text(self.case_watermark.text(), max_length=64) or None
+            path, hash_value = export_case_bundle(
+                self.db,
+                case_id,
+                self.settings.exports_dir,
+                redacted=redacted,
+                watermark=watermark,
+            )
             json_path = export_case_json(self.db, case_id, self.settings.exports_dir)
             QtWidgets.QMessageBox.information(
                 self,
@@ -862,7 +913,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path:
             return
         try:
-            filename, digest = add_evidence(self.db, case_id, Path(path), self.username)
+            tags = [t.strip() for t in self.evidence_tags.text().split(",") if t.strip()]
+            filename, digest = add_evidence(
+                self.db,
+                case_id,
+                Path(path),
+                self.username,
+                evidence_type=self.evidence_type.currentText(),
+                tags=tags,
+                importance=self.evidence_importance.currentText(),
+            )
             QtWidgets.QMessageBox.information(self, "Evidence stored", f"{filename}\nSHA256: {digest}")
             self.audit.log(self.username, AuditAction.EVIDENCE_ADDED.value, target=case_id, details=filename)
             self._load_evidence_table()
@@ -874,12 +934,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if not case_id:
             return
         try:
-            _, digest = seal_case(self.db, case_id, sealed_by=self.username)
-            QtWidgets.QMessageBox.information(self, "Case sealed", f"Hash: {digest}")
+            _, merkle = seal_case(
+                self.db,
+                case_id,
+                sealed_by=self.username,
+                seal_reason=self.evidence_seal_reason.currentText(),
+            )
+            QtWidgets.QMessageBox.information(self, "Case sealed", f"Merkle root: {merkle}")
             self.audit.log(self.username, AuditAction.CASE_SEALED.value, target=case_id, details="sealed")
             self._load_evidence_table()
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(self, "Seal", str(exc))
+
+    def _verify_seal(self):
+        case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
+        if not case_id:
+            return
+        ok = verify_seal(self.db, case_id)
+        message = "Seal intact" if ok else "Seal mismatch"
+        QtWidgets.QMessageBox.information(self, "Verify seal", message)
+        self.audit.log(self.username, AuditAction.CASE_SEALED.value, target=case_id, details=message)
 
     def _compare_cases(self):
         case_a = sanitize_text(self.compare_case_a.text(), max_length=128)
@@ -935,6 +1009,42 @@ class MainWindow(QtWidgets.QMainWindow):
                 break
             dialog.show_error(message or "Invalid credentials")
             self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
+
+    def _register_shortcuts(self) -> None:
+        palette_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Ctrl+P"), self)
+        palette_shortcut.activated.connect(self._open_command_palette)
+
+    def _open_command_palette(self) -> None:
+        commands = {
+            "Open case by ID": self._prompt_open_case,
+            "Lock session": self._lock_session,
+            "Refresh alerts": self._load_alerts,
+            "Run correlation": lambda: self.correlations.correlate([]),
+        }
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "Command Palette",
+            "Select action",
+            list(commands.keys()),
+            0,
+            False,
+        )
+        if ok and item in commands:
+            commands[item]()
+
+    def _prompt_open_case(self) -> None:
+        case_id, ok = QtWidgets.QInputDialog.getText(self, "Open case", "Case ID")
+        if ok and case_id:
+            self.evidence_case_input.setText(case_id)
+            self.timeline_case_input.setText(case_id)
+            self._load_case_details_by_id(case_id)
+
+    def _load_case_details_by_id(self, case_id: str) -> None:
+        for row in range(self.case_table.rowCount()):
+            if self.case_table.item(row, 0).text() == case_id:
+                self.case_table.setCurrentCell(row, 0)
+                self._load_case_details()
+                return
 
 
 class AppBootstrap:

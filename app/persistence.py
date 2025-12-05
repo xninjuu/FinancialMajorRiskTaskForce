@@ -11,7 +11,7 @@ from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
@@ -100,7 +100,10 @@ class PersistenceLayer:
                 case_id TEXT,
                 path TEXT,
                 hash TEXT,
-                created_at TEXT
+                created_at TEXT,
+                redacted INTEGER DEFAULT 0,
+                watermark TEXT,
+                manifest TEXT
             )
             """
         )
@@ -113,7 +116,12 @@ class PersistenceLayer:
                 hash TEXT,
                 added_by TEXT,
                 sealed INTEGER DEFAULT 0,
-                created_at TEXT
+                created_at TEXT,
+                evidence_type TEXT,
+                tags TEXT,
+                importance TEXT,
+                preview_path TEXT,
+                ocr_text TEXT
             )
             """
         )
@@ -123,7 +131,9 @@ class PersistenceLayer:
                 case_id TEXT PRIMARY KEY,
                 hash TEXT NOT NULL,
                 sealed_at TEXT,
-                sealed_by TEXT
+                sealed_by TEXT,
+                merkle_root TEXT,
+                seal_reason TEXT
             )
             """
         )
@@ -134,7 +144,9 @@ class PersistenceLayer:
                 alert_id TEXT,
                 related_id TEXT,
                 reason TEXT,
-                created_at TEXT
+                created_at TEXT,
+                confidence REAL,
+                reason_token TEXT
             )
             """
         )
@@ -334,38 +346,109 @@ class PersistenceLayer:
         rows = cursor.fetchall()
         return [self._row_to_transaction(row) for row in rows]
 
-    def record_export(self, case_id: str, path: str, hash_value: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "INSERT INTO forensic_exports (case_id, path, hash, created_at) VALUES (?, ?, ?, ?)",
-            (case_id, path, hash_value, datetime.utcnow().isoformat()),
-        )
-        self.conn.commit()
-
-    def record_evidence(self, case_id: str, filename: str, hash_value: str, *, added_by: str, sealed: bool = False) -> None:
+    def record_export(
+        self,
+        case_id: str,
+        path: str,
+        hash_value: str,
+        *,
+        redacted: bool = False,
+        watermark: str | None = None,
+        manifest: str | None = None,
+    ) -> None:
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO evidence (case_id, filename, hash, added_by, sealed, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO forensic_exports (case_id, path, hash, created_at, redacted, watermark, manifest)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, filename, hash_value, added_by, int(sealed), datetime.utcnow().isoformat()),
+            (
+                case_id,
+                path,
+                hash_value,
+                datetime.utcnow().isoformat(),
+                int(redacted),
+                watermark,
+                manifest,
+            ),
+        )
+        self.conn.commit()
+
+    def record_evidence(
+        self,
+        case_id: str,
+        filename: str,
+        hash_value: str,
+        *,
+        added_by: str,
+        sealed: bool = False,
+        evidence_type: str | None = None,
+        tags: str | None = None,
+        importance: str | None = None,
+        preview_path: str | None = None,
+        ocr_text: str | None = None,
+    ) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO evidence (
+                case_id, filename, hash, added_by, sealed, created_at,
+                evidence_type, tags, importance, preview_path, ocr_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                filename,
+                hash_value,
+                added_by,
+                int(sealed),
+                datetime.utcnow().isoformat(),
+                evidence_type,
+                tags,
+                importance,
+                preview_path,
+                ocr_text,
+            ),
         )
         self.conn.commit()
 
     def list_evidence(self, case_id: str) -> list[sqlite3.Row]:
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT id, filename, hash, added_by, sealed, created_at FROM evidence WHERE case_id = ? ORDER BY datetime(created_at) DESC",
+            """
+            SELECT id, filename, hash, added_by, sealed, created_at, evidence_type, tags, importance, preview_path, ocr_text
+            FROM evidence
+            WHERE case_id = ?
+            ORDER BY datetime(created_at) DESC
+            """,
             (case_id,),
         )
         return cursor.fetchall()
 
-    def seal_case(self, case_id: str, hash_value: str, *, sealed_by: str) -> None:
+    def seal_case(
+        self,
+        case_id: str,
+        hash_value: str,
+        *,
+        sealed_by: str,
+        merkle_root: str | None = None,
+        seal_reason: str | None = None,
+    ) -> None:
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO sealed_cases (case_id, hash, sealed_at, sealed_by) VALUES (?, ?, ?, ?)",
-            (case_id, hash_value, datetime.utcnow().isoformat(), sealed_by),
+            """
+            INSERT OR REPLACE INTO sealed_cases (case_id, hash, sealed_at, sealed_by, merkle_root, seal_reason)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                hash_value,
+                datetime.utcnow().isoformat(),
+                sealed_by,
+                merkle_root,
+                seal_reason,
+            ),
         )
         self.conn.commit()
 
@@ -374,18 +457,34 @@ class PersistenceLayer:
         cursor.execute("SELECT case_id, hash, sealed_at, sealed_by FROM sealed_cases WHERE case_id = ?", (case_id,))
         return cursor.fetchone()
 
-    def record_correlation(self, alert_id: str, related_id: str, reason: str) -> None:
+    def record_correlation(
+        self,
+        alert_id: str,
+        related_id: str,
+        reason: str,
+        *,
+        confidence: float | None = None,
+        reason_token: str | None = None,
+    ) -> None:
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT INTO correlations (alert_id, related_id, reason, created_at) VALUES (?, ?, ?, ?)",
-            (alert_id, related_id, reason, datetime.utcnow().isoformat()),
+            """
+            INSERT INTO correlations (alert_id, related_id, reason, created_at, confidence, reason_token)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (alert_id, related_id, reason, datetime.utcnow().isoformat(), confidence, reason_token),
         )
         self.conn.commit()
 
     def list_correlations(self, alert_id: str) -> list[sqlite3.Row]:
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT related_id, reason, created_at FROM correlations WHERE alert_id = ? ORDER BY datetime(created_at) DESC",
+            """
+            SELECT related_id, reason, created_at, confidence, reason_token
+            FROM correlations
+            WHERE alert_id = ?
+            ORDER BY datetime(created_at) DESC
+            """,
             (alert_id,),
         )
         return cursor.fetchall()

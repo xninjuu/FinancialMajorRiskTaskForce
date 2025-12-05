@@ -202,28 +202,96 @@ class Database:
     def list_transactions(self, *, limit: int = 200):
         return self.persistence.list_transactions(limit=limit)
 
-    def record_export(self, case_id: str, path: str, hash_value: str) -> None:
-        self.persistence.record_export(case_id, path, hash_value)
+    def record_export(
+        self,
+        case_id: str,
+        path: str,
+        hash_value: str,
+        *,
+        redacted: bool = False,
+        watermark: str | None = None,
+        manifest: str | None = None,
+    ) -> None:
+        self.persistence.record_export(
+            case_id,
+            path,
+            hash_value,
+            redacted=redacted,
+            watermark=watermark,
+            manifest=manifest,
+        )
 
     # Extended investigative helpers
-    def record_evidence(self, case_id: str, filename: str, hash_value: str, *, added_by: str, sealed: bool = False) -> None:
+    def record_evidence(
+        self,
+        case_id: str,
+        filename: str,
+        hash_value: str,
+        *,
+        added_by: str,
+        sealed: bool = False,
+        evidence_type: str | None = None,
+        tags: str | None = None,
+        importance: str | None = None,
+        preview_path: str | None = None,
+        ocr_text: str | None = None,
+    ) -> None:
         filename = sanitize_text(filename, max_length=256)
         added_by = sanitize_text(added_by, max_length=64)
-        self.persistence.record_evidence(case_id, filename, hash_value, added_by=added_by, sealed=sealed)
+        self.persistence.record_evidence(
+            case_id,
+            filename,
+            hash_value,
+            added_by=added_by,
+            sealed=sealed,
+            evidence_type=evidence_type,
+            tags=tags,
+            importance=importance,
+            preview_path=preview_path,
+            ocr_text=ocr_text,
+        )
 
     def list_evidence(self, case_id: str):
         return self.persistence.list_evidence(case_id)
 
-    def seal_case(self, case_id: str, hash_value: str, *, sealed_by: str) -> None:
+    def seal_case(
+        self,
+        case_id: str,
+        hash_value: str,
+        *,
+        sealed_by: str,
+        merkle_root: str | None = None,
+        seal_reason: str | None = None,
+    ) -> None:
         sealed_by = sanitize_text(sealed_by, max_length=64)
-        self.persistence.seal_case(case_id, hash_value, sealed_by=sealed_by)
+        self.persistence.seal_case(
+            case_id,
+            hash_value,
+            sealed_by=sealed_by,
+            merkle_root=merkle_root,
+            seal_reason=seal_reason,
+        )
 
     def sealed_case(self, case_id: str):
         return self.persistence.sealed_case(case_id)
 
-    def record_correlation(self, alert_id: str, related_id: str, reason: str) -> None:
+    def record_correlation(
+        self,
+        alert_id: str,
+        related_id: str,
+        reason: str,
+        *,
+        confidence: float | None = None,
+        reason_token: str | None = None,
+    ) -> None:
         reason = sanitize_text(reason, max_length=200)
-        self.persistence.record_correlation(alert_id, related_id, reason)
+        self.persistence.record_correlation(
+            alert_id,
+            related_id,
+            reason,
+            confidence=confidence,
+            reason_token=reason_token,
+        )
 
     def list_correlations(self, alert_id: str):
         return self.persistence.list_correlations(alert_id)
@@ -237,7 +305,13 @@ class Database:
     def audit_for_target(self, target: str, *, limit: int = 200):
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT timestamp, username, action, target, details FROM audit_log WHERE target = ? ORDER BY datetime(timestamp) ASC LIMIT ?",
+            """
+            SELECT timestamp, username, action, target, details
+            FROM audit_log
+            WHERE target = ?
+            ORDER BY datetime(timestamp) ASC
+            LIMIT ?
+            """,
             (target, limit),
         )
         return cursor.fetchall()
