@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.domain import CaseNote, Transaction
+from app.core.validation import sanitize_text
 from app.persistence import PersistenceLayer
 
 
@@ -24,7 +25,9 @@ class Database:
             CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
-                role TEXT NOT NULL
+                role TEXT NOT NULL,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT
             )
             """
         )
@@ -40,6 +43,16 @@ class Database:
             )
             """
         )
+        self.conn.commit()
+        self._ensure_user_security_columns(cursor)
+
+    def _ensure_user_security_columns(self, cursor: sqlite3.Cursor) -> None:
+        cursor.execute("PRAGMA table_info(users)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if "failed_attempts" not in cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0")
+        if "locked_until" not in cols:
+            cursor.execute("ALTER TABLE users ADD COLUMN locked_until TEXT")
         self.conn.commit()
 
     def ensure_admin(self, *, password_hash: str | None, generated_password_callback) -> None:
@@ -58,13 +71,49 @@ class Database:
 
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT username, password_hash, role FROM users WHERE username = ?", (username,))
+        cursor.execute(
+            "SELECT username, password_hash, role, failed_attempts, locked_until FROM users WHERE username = ?",
+            (username,),
+        )
         row = cursor.fetchone()
         if not row:
             return None
-        return {"username": row[0], "password_hash": row[1], "role": row[2]}
+        return {
+            "username": row[0],
+            "password_hash": row[1],
+            "role": row[2],
+            "failed_attempts": row[3],
+            "locked_until": row[4],
+        }
+
+    def record_login_failure(self, username: str, *, threshold: int, lock_minutes: int) -> None:
+        user = self.get_user(username)
+        if not user:
+            return
+        attempts = (user.get("failed_attempts") or 0) + 1
+        locked_until = None
+        if attempts >= threshold:
+            locked_until = datetime.utcnow() + timedelta(minutes=lock_minutes)
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE username = ?",
+            (attempts, locked_until.isoformat() if locked_until else None, username),
+        )
+        self.conn.commit()
+
+    def record_login_success(self, username: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = ?",
+            (username,),
+        )
+        self.conn.commit()
 
     def record_audit(self, username: str, action: str, target: str | None = None, details: str | None = None) -> None:
+        username = sanitize_text(username, max_length=64)
+        action = sanitize_text(action, max_length=64)
+        target = sanitize_text(target, max_length=128) if target else None
+        details = sanitize_text(details, max_length=512) if details else None
         cursor = self.conn.cursor()
         cursor.execute(
             "INSERT INTO audit_log (timestamp, username, action, target, details) VALUES (?, ?, ?, ?, ?)",

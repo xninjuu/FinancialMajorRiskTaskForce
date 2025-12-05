@@ -269,6 +269,14 @@ Beim Start erscheinen im Terminal:
 - Erste UI-Kacheln für KPIs, Live-Tabelle und Alert-Liste binden.
 
 ## Desktop GUI (PySide6) build and run
+
+### Security defaults (OWASP-aligned)
+- Login required with bcrypt hashes, password policy (>=12 chars), lockout after repeated failures (5x/5min), and inactivity re-lock.
+- RBAC roles enforced in UI and code (e.g., case close requires LEAD/ADMIN).
+- Audit logging is always on (login success/failure, case status changes, notes, locks).
+- Input validation/sanitizing lives in `app/core/validation.py`; UI shows generic errors to avoid leaking technical details.
+- No secrets in code; set `CODEX_ADMIN_PASSWORD` via environment. Consider SQLCipher/field encryption plus NTFS hardening for the SQLite file.
+
 1. Install dependencies inside your activated `.venv` (PowerShell):
    ```powershell
    pip install -U pip
@@ -293,3 +301,7 @@ Beim Start erscheinen im Terminal:
 6. Packaging note:
    - The GUI runs offline and does not start any FastAPI/Uvicorn server.
    - For troubleshooting, keep the console window (PyInstaller `console=True`) to view errors instead of silent exits.
+
+### Compliance & Privacy
+- See `SECURITY.md` for OWASP-aligned practices and `SECURITY_TODO.md` for the open hardening backlog.
+- See `docs/legal_context.md` for DSGVO/GwG/FATF pointers and expected retention/archival considerations.

@@ -10,7 +10,8 @@ from PySide6 import QtCore, QtWidgets
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
 from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
-from app.security.audit import AuditLogger
+from app.core.validation import sanitize_text
+from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
 from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offshore_transactions, structuring_burst
@@ -271,11 +272,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         case_id = self.case_table.item(row, 0).text()
         self.db.update_case_status(case_id, status="CLOSED")
-        self.audit.log(self.username, "CASE_STATUS_CHANGE", target=case_id, details="Closed from UI")
-        note_text = self.case_notes.toPlainText().strip()
+        self.audit.log(self.username, AuditAction.CASE_STATUS_CHANGE.value, target=case_id, details="Closed from UI")
+        note_text = sanitize_text(self.case_notes.toPlainText(), max_length=500, allow_newlines=False)
         if note_text:
             self.db.attach_note(case_id, CaseNote(author=self.username, message=note_text, created_at=datetime.utcnow()))
-            self.audit.log(self.username, "CASE_NOTE_ADDED", target=case_id, details=note_text[:120])
+            self.audit.log(self.username, AuditAction.CASE_NOTE_ADDED.value, target=case_id, details=note_text[:120])
             self.case_notes.clear()
         self.refresh_all()
 
@@ -296,12 +297,13 @@ class MainWindow(QtWidgets.QMainWindow):
         from app.ui.login_dialog import LoginDialog
 
         dialog = LoginDialog(self)
+        self.audit.log(self.username, AuditAction.SESSION_LOCK.value, details="User-initiated lock or timeout")
         while True:
             if dialog.exec() == QtWidgets.QDialog.Rejected:
                 QtWidgets.QMessageBox.warning(self, "Locked", "Application locked. Close and restart if you cannot log in.")
                 continue
             username, password = dialog.credentials()
-            ok, role = self.auth.authenticate(username, password)
+            ok, role, message = self.auth.authenticate(username, password)
             if ok:
                 self.username = username
                 self.role = role or self.role
@@ -309,8 +311,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.audit.log(username, "LOGIN_SUCCESS", details="Unlocked session")
                 self.role_label.setText(self.role)
                 break
-            dialog.show_error("Invalid credentials")
-            self.audit.log(username or "unknown", "LOGIN_FAILURE", details="Unlock failed")
+            dialog.show_error(message or "Invalid credentials")
+            self.audit.log(username or "unknown", "LOGIN_FAILURE", details=message or "Unlock failed")
 
 
 class AppBootstrap:

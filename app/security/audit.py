@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+from enum import Enum
+
 from app.storage.db import Database
+
+
+class AuditAction(str, Enum):
+    LOGIN_SUCCESS = "LOGIN_SUCCESS"
+    LOGIN_FAILURE = "LOGIN_FAILURE"
+    CASE_STATUS_CHANGE = "CASE_STATUS_CHANGE"
+    CASE_NOTE_ADDED = "CASE_NOTE_ADDED"
+    SETTINGS_CHANGE = "SETTINGS_CHANGE"
+    SESSION_LOCK = "SESSION_LOCK"
 
 
 class AuditLogger:

@@ -8,7 +8,7 @@ from PySide6 import QtWidgets
 
 from app.config.settings import SettingsLoader
 from app.security.auth import AuthService
-from app.security.audit import AuditLogger
+from app.security.audit import AuditLogger, AuditAction
 from app.storage.db import Database
 from app.ui.login_dialog import LoginDialog
 from app.ui.main_window import AppBootstrap, MainWindow
@@ -32,12 +32,12 @@ def main() -> None:
             print("Login cancelled")
             sys.exit(1)
         username, password = login.credentials()
-        ok, role = auth.authenticate(username, password)
+        ok, role, message = auth.authenticate(username, password)
         if ok:
-            audit.log(username, "LOGIN_SUCCESS", details="GUI login")
+            audit.log(username, AuditAction.LOGIN_SUCCESS.value, details="GUI login")
             break
-        login.show_error("Invalid credentials")
-        audit.log(username or "unknown", "LOGIN_FAILURE", details="GUI login failure")
+        login.show_error(message or "Invalid credentials")
+        audit.log(username or "unknown", AuditAction.LOGIN_FAILURE.value, details=message or "GUI login failure")
 
     bootstrap = AppBootstrap(db)
     engine, thresholds = bootstrap.build_risk_engine()

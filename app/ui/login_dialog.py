@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtWidgets
 
+from app.core.validation import validate_password_policy, validate_username
 
 class LoginDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
@@ -31,7 +32,7 @@ class LoginDialog(QtWidgets.QDialog):
         layout.addLayout(btns)
         self.setLayout(layout)
 
-        self.login_button.clicked.connect(self.accept)
+        self.login_button.clicked.connect(self._on_login)
         self.cancel_button.clicked.connect(self.reject)
 
     def credentials(self):
@@ -39,3 +40,14 @@ class LoginDialog(QtWidgets.QDialog):
 
     def show_error(self, message: str):
         self.message_label.setText(message)
+
+    def _on_login(self):
+        username, password = self.credentials()
+        if not validate_username(username):
+            self.show_error("Bitte gültigen Benutzernamen eingeben (3-64 Zeichen).")
+            return
+        ok, reason = validate_password_policy(password)
+        if not ok:
+            self.show_error(reason)
+            return
+        self.accept()
