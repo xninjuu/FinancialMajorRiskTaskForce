@@ -54,15 +54,17 @@ class AuthService:
         in a controlled way (e.g., login dialog hint, README note).
         """
         username = os.getenv("CODEX_DEMO_USER", "analyst_demo")
-        password = os.getenv("CODEX_DEMO_PASSWORD", "FMRdemo!2025")
+        password = os.getenv("CODEX_DEMO_PASSWORD", "FMRdemo!2025+")
         if not validate_username(username):
             username = "analyst_demo"
         ok, reason = validate_password_policy(password, min_length=self.min_password_length)
         if not ok:
             # fall back to a generated compliant password but still expose a value to the caller
             password = os.getenv("CODEX_DEMO_PASSWORD_FALLBACK", "FMRdemo!2025-Longer")
-        if not self.db.get_user(username):
-            self.db.create_user(username=username, password_hash=self.hash_password(password), role="ANALYST")
+        # Always (re)seed the demo user to ensure the credentials are valid even when an
+        # older database exists. INSERT OR REPLACE in the DB layer guarantees the password
+        # is refreshed so the login dialog hint always matches the stored hash.
+        self.db.create_user(username=username, password_hash=self.hash_password(password), role="ANALYST")
         return username, password
 
     def register_user(self, *, username: str, password: str, role: str = "ANALYST") -> tuple[bool, str]:
