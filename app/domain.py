@@ -124,3 +124,25 @@ class Case:
         if self.alerts:
             return self.alerts[0].transaction.account_id
         return None
+
+
+class TaskStatus(Enum):
+    OPEN = auto()
+    IN_PROGRESS = auto()
+    REVIEW = auto()
+    DONE = auto()
+
+
+@dataclass
+class Task:
+    id: str
+    title: str
+    created_by: str
+    assignee: str
+    priority: str = "Normal"
+    status: TaskStatus = TaskStatus.OPEN
+    related_case_id: str | None = None
+    related_alert_id: str | None = None
+    due_at: datetime | None = None
+    description: str | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)

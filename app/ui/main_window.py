@@ -20,11 +20,12 @@ from app.core.sealed_case import seal_case, verify_seal
 from app.core.secure_clipboard import SecureClipboard
 from app.core.validation import sanitize_text, validate_role
 from app.core.evidence_locker import add_evidence, list_evidence
-from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
+from app.domain import Alert, Case, CaseNote, CaseStatus, Task, TaskStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
+from app.ui.app_state import AppState
 from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offshore_transactions, structuring_burst
 from app.ui.case_timeline import CaseTimelineDialog
 from app.ui.network_view import NetworkView
@@ -130,6 +131,7 @@ class MainWindow(QtWidgets.QMainWindow):
         session_timeout_minutes: int = 15,
         tamper_warnings: Optional[List[str]] = None,
         settings: Optional[AppSettings] = None,
+        app_state: Optional[AppState] = None,
     ):
         super().__init__()
         self.db = db
@@ -141,6 +143,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_activity = datetime.utcnow()
         self.tamper_warnings = tamper_warnings or []
         self.settings = settings
+        self.app_state = app_state or AppState()
         self.baselines = BaselineEngine(db)
         self.correlations = CorrelationEngine(db)
         self.clipboard = SecureClipboard(self)
@@ -191,6 +194,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Audit", self._build_security()),
             ("Alert Clusters", self._build_clusters()),
             ("Compare Cases", self._build_compare()),
+            ("Tasks", self._build_tasks()),
             ("Settings", self._build_settings()),
         ]
 
@@ -207,6 +211,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.nav_list.currentRowChanged.connect(self.content_stack.setCurrentIndex)
         self.nav_list.setCurrentRow(0)
+        self._load_tasks()
 
         self._activity_timer = QtCore.QTimer(self)
         self._activity_timer.timeout.connect(self._check_session_timeout)
@@ -460,6 +465,64 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.timeline_table)
         self.timeline_refresh.clicked.connect(self._load_timeline_tab)
         self.timeline_zoom.valueChanged.connect(self._load_timeline_tab)
+        return page
+
+    def _build_tasks(self) -> QtWidgets.QWidget:
+        page = SectionCard()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.addWidget(create_section_header("Tasks & Assignments", accent="#8ab4f8"))
+
+        controls = QtWidgets.QHBoxLayout()
+        self.task_filter_assignee = QtWidgets.QComboBox()
+        self.task_filter_assignee.addItems(["Mine", "All"])
+        self.task_filter_status = QtWidgets.QComboBox()
+        self.task_filter_status.addItems(["Any", "OPEN", "IN_PROGRESS", "REVIEW", "DONE"])
+        self.task_refresh_btn = QtWidgets.QPushButton("Refresh")
+        controls.addWidget(QtWidgets.QLabel("Assignee"))
+        controls.addWidget(self.task_filter_assignee)
+        controls.addWidget(QtWidgets.QLabel("Status"))
+        controls.addWidget(self.task_filter_status)
+        controls.addWidget(self.task_refresh_btn)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.task_table = QtWidgets.QTableWidget(0, 8)
+        self.task_table.setHorizontalHeaderLabels(
+            ["Title", "Case", "Alert", "Assignee", "Priority", "Status", "Due", "Created"]
+        )
+        self.task_table.horizontalHeader().setStretchLastSection(True)
+        self.task_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        layout.addWidget(self.task_table)
+
+        form = QtWidgets.QFormLayout()
+        self.task_title_input = QtWidgets.QLineEdit()
+        self.task_case_input = QtWidgets.QLineEdit()
+        self.task_alert_input = QtWidgets.QLineEdit()
+        self.task_assignee_input = QtWidgets.QLineEdit(self.username)
+        self.task_priority = QtWidgets.QComboBox()
+        self.task_priority.addItems(["Low", "Normal", "High", "Critical"])
+        self.task_due = QtWidgets.QDateEdit()
+        self.task_due.setCalendarPopup(True)
+        self.task_due.setDate(QtCore.QDate.currentDate())
+        self.task_desc = QtWidgets.QLineEdit()
+        form.addRow("Title", self.task_title_input)
+        form.addRow("Case ID", self.task_case_input)
+        form.addRow("Alert ID", self.task_alert_input)
+        form.addRow("Assignee", self.task_assignee_input)
+        form.addRow("Priority", self.task_priority)
+        form.addRow("Due", self.task_due)
+        form.addRow("Description", self.task_desc)
+        layout.addLayout(form)
+
+        self.task_add_btn = QtWidgets.QPushButton("Add Task")
+        layout.addWidget(self.task_add_btn)
+
+        self.task_refresh_btn.clicked.connect(self._load_tasks)
+        self.task_filter_assignee.currentTextChanged.connect(self._load_tasks)
+        self.task_filter_status.currentTextChanged.connect(self._load_tasks)
+        self.task_add_btn.clicked.connect(self._create_task)
+        self.task_table.itemDoubleClicked.connect(self._mark_task_progress)
+        self.app_state.case_changed.connect(self._prefill_task_case)
         return page
 
     def _build_customers(self) -> QtWidgets.QWidget:
@@ -755,6 +818,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not case_id_item:
             return
         case_id = case_id_item.text()
+        self.app_state.set_selected_case(case_id)
         status_text = status_widget.text() if status_widget else self.case_table.item(row, 1).text()
         update_pill(self.case_status_pill, status_text, self._status_state(status_text))
         self.case_title.setText(f"Case {case_id}")
@@ -1055,6 +1119,77 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _copy_compare(self):
         self.clipboard.copy(self.compare_text.toPlainText())
+
+    def _prefill_task_case(self, case_id: str) -> None:
+        self.task_case_input.setText(case_id)
+
+    def _load_tasks(self) -> None:
+        assignee = self.username if self.task_filter_assignee.currentText() == "Mine" else None
+        status_text = self.task_filter_status.currentText()
+        status = TaskStatus[status_text] if status_text in TaskStatus.__members__ else None
+        tasks = self.db.list_tasks(assignee=assignee, status=status, limit=200)
+        self.task_table.setRowCount(len(tasks))
+        for idx, task in enumerate(tasks):
+            due = task.due_at.strftime("%Y-%m-%d") if task.due_at else "-"
+            created = task.created_at.strftime("%Y-%m-%d")
+            values = [
+                task.title,
+                task.related_case_id or "-",
+                task.related_alert_id or "-",
+                task.assignee,
+                task.priority,
+                task.status.name,
+                due,
+                created,
+            ]
+            for col, value in enumerate(values):
+                item = QtWidgets.QTableWidgetItem(str(value))
+                if col == 0:
+                    item.setData(QtCore.Qt.UserRole, task.id)
+                self.task_table.setItem(idx, col, item)
+
+    def _create_task(self) -> None:
+        title = sanitize_text(self.task_title_input.text(), max_length=160)
+        if not title:
+            QtWidgets.QMessageBox.warning(self, "Task", "Title is required")
+            return
+        task = Task(
+            id=str(uuid.uuid4()),
+            title=title,
+            description=sanitize_text(self.task_desc.text(), max_length=400) or None,
+            created_by=self.username,
+            assignee=sanitize_text(self.task_assignee_input.text(), max_length=64) or self.username,
+            priority=self.task_priority.currentText(),
+            status=TaskStatus.OPEN,
+            related_case_id=sanitize_text(self.task_case_input.text(), max_length=128) or None,
+            related_alert_id=sanitize_text(self.task_alert_input.text(), max_length=128) or None,
+            due_at=self.task_due.date().toPython(),
+        )
+        self.db.upsert_task(task)
+        self.audit.log(self.username, AuditAction.CASE_NOTE.value, target=task.related_case_id or "task", details=task.title)
+        self._load_tasks()
+        QtWidgets.QMessageBox.information(self, "Task", "Task created")
+
+    def _mark_task_progress(self) -> None:
+        row = self.task_table.currentRow()
+        if row < 0:
+            return
+        task_title = self.task_table.item(row, 0).text()
+        case_id = self.task_table.item(row, 1).text()
+        alert_id = self.task_table.item(row, 2).text()
+        task_id = self.task_table.item(row, 0).data(QtCore.Qt.UserRole)
+        status_cycle = [TaskStatus.OPEN, TaskStatus.IN_PROGRESS, TaskStatus.REVIEW, TaskStatus.DONE]
+        current_status = TaskStatus[self.task_table.item(row, 5).text()]
+        next_index = (status_cycle.index(current_status) + 1) % len(status_cycle)
+        next_status = status_cycle[next_index]
+        self.db.update_task_status(task_id or task_title, next_status)
+        self.audit.log(
+            self.username,
+            AuditAction.CASE_STATUS_CHANGED.value,
+            target=case_id or alert_id or "task",
+            details=f"Task {task_title} -> {next_status.name}",
+        )
+        self._load_tasks()
 
     def eventFilter(self, source, event):
         if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.KeyPress}:

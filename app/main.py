@@ -11,6 +11,7 @@ from app.security.auth import AuthService
 from app.security.audit import AuditLogger, AuditAction
 from app.security.tamper import verify_executable
 from app.storage.db import Database
+from app.ui.app_state import AppState
 from app.ui.login_dialog import LoginDialog
 from app.ui.main_window import AppBootstrap, MainWindow
 
@@ -46,6 +47,7 @@ def main() -> None:
         login.show_error(message or "Invalid credentials")
         audit.log(username or "unknown", AuditAction.LOGIN_FAILURE.value, details=message or "GUI login failure")
 
+    app_state = AppState()
     bootstrap = AppBootstrap(db)
     engine, thresholds = bootstrap.build_risk_engine()
     window = MainWindow(
@@ -57,6 +59,7 @@ def main() -> None:
         session_timeout_minutes=settings.session_timeout_minutes,
         tamper_warnings=tamper_result.warnings,
         settings=settings,
+        app_state=app_state,
     )
     worker = bootstrap.start_simulation(engine, thresholds)
     window.attach_simulation(worker)

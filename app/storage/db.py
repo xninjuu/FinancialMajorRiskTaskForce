@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.validation import sanitize_text, validate_role
-from app.domain import CaseNote, Transaction
+from app.domain import CaseNote, Task, TaskStatus, Transaction
 from app.persistence import PersistenceLayer
 
 
@@ -198,6 +198,16 @@ class Database:
 
     def get_transaction(self, tx_id: str):
         return self.persistence.get_transaction(tx_id)
+
+    # Tasks
+    def upsert_task(self, task: Task) -> None:
+        self.persistence.upsert_task(task)
+
+    def list_tasks(self, *, assignee: str | None = None, status: TaskStatus | None = None, limit: int = 200):
+        return self.persistence.list_tasks(assignee=assignee, status=status, limit=limit)
+
+    def update_task_status(self, task_id: str, status: TaskStatus) -> None:
+        self.persistence.update_task_status(task_id, status)
 
     def list_transactions(self, *, limit: int = 200):
         return self.persistence.list_transactions(limit=limit)

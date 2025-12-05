@@ -221,6 +221,7 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 - Actor-Dashboard mit Basislinien/Counts je Kunde
 - Netzwerk-Graph mit Korrelationen, Fokus/Export (PNG/SVG) + Timeline-Dialog
 - Forensic-Export (JSON/ZIP) inkl. redacted Mode, Watermark, Manifest (KYC/Korrelation/Evidence)
+- Tasking-Tab mit Zuweisungen, Fälligkeiten und Status-Cycling (Doppelklick), inkl. Prefill aus ausgewähltem Case
 
 ### Windows: Einzelne EXE mit PyInstaller (GUI)
 Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), Abhängigkeiten installiert (`pip install -r requirements.txt`).

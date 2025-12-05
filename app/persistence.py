@@ -6,12 +6,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-from .domain import Alert, Case, CaseNote, CaseStatus, Transaction
+from .domain import Alert, Case, CaseNote, CaseStatus, Task, TaskStatus, Transaction
 from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
@@ -38,6 +38,7 @@ class PersistenceLayer:
         cursor.execute("DROP TABLE IF EXISTS sealed_cases")
         cursor.execute("DROP TABLE IF EXISTS correlations")
         cursor.execute("DROP TABLE IF EXISTS baselines")
+        cursor.execute("DROP TABLE IF EXISTS tasks")
         cursor.execute(
             """
             CREATE TABLE transactions (
@@ -157,6 +158,23 @@ class PersistenceLayer:
                 avg_amount REAL,
                 tx_count INTEGER,
                 updated_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                description TEXT,
+                created_by TEXT,
+                assignee TEXT,
+                priority TEXT,
+                status TEXT,
+                related_case_id TEXT,
+                related_alert_id TEXT,
+                due_at TEXT,
+                created_at TEXT
             )
             """
         )
@@ -330,6 +348,81 @@ class PersistenceLayer:
             CaseNote(author=row["author"], message=row["message"], created_at=datetime.fromisoformat(row["created_at"]))
             for row in rows
         ]
+
+    # region Tasks
+    def upsert_task(self, task: Task) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO tasks (
+                id, title, description, created_by, assignee, priority, status,
+                related_case_id, related_alert_id, due_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task.id,
+                task.title,
+                task.description,
+                task.created_by,
+                task.assignee,
+                task.priority,
+                task.status.name,
+                task.related_case_id,
+                task.related_alert_id,
+                task.due_at.isoformat() if task.due_at else None,
+                task.created_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def list_tasks(
+        self,
+        *,
+        assignee: str | None = None,
+        status: TaskStatus | None = None,
+        limit: int = 200,
+    ) -> list[Task]:
+        cursor = self.conn.cursor()
+        query = "SELECT * FROM tasks"
+        params: list[str] = []
+        clauses: list[str] = []
+        if assignee:
+            clauses.append("assignee = ?")
+            params.append(assignee)
+        if status:
+            clauses.append("status = ?")
+            params.append(status.name)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY datetime(created_at) DESC LIMIT ?"
+        params.append(str(limit))
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [self._row_to_task(row) for row in rows]
+
+    def update_task_status(self, task_id: str, status: TaskStatus) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (status.name, task_id))
+        self.conn.commit()
+
+    def _row_to_task(self, row: sqlite3.Row) -> Task:
+        due_at = datetime.fromisoformat(row["due_at"]) if row["due_at"] else None
+        created_at = datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.utcnow()
+        status_name = row["status"] or TaskStatus.OPEN.name
+        return Task(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            created_by=row["created_by"],
+            assignee=row["assignee"],
+            priority=row["priority"],
+            status=TaskStatus[status_name] if status_name in TaskStatus.__members__ else TaskStatus.OPEN,
+            related_case_id=row["related_case_id"],
+            related_alert_id=row["related_alert_id"],
+            due_at=due_at,
+            created_at=created_at,
+        )
+    # endregion
 
     def get_transaction(self, tx_id: str) -> Transaction | None:
         cursor = self.conn.cursor()
