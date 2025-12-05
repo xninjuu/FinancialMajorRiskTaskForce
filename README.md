@@ -216,10 +216,11 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
 
 ### Investigator-Tools (Desktop)
 - Evidence-Locker mit Hashing/Sealing (Tab "Evidence")
+- Thumbnails + optional OCR für Evidence (Images/PDF), Filter/Tags und Siegel-Metadaten
 - Case-Compare & Alert-Cluster-View für Überschneidungen
 - Actor-Dashboard mit Basislinien/Counts je Kunde
-- Netzwerk-Graph mit Korrelationen + Timeline-Dialog
-- Forensic-Export (JSON/PDF/ZIP) inkl. Hash-Logging
+- Netzwerk-Graph mit Korrelationen, Fokus/Export (PNG/SVG) + Timeline-Dialog
+- Forensic-Export (JSON/ZIP) inkl. redacted Mode, Watermark, Manifest (KYC/Korrelation/Evidence)
 
 ### Windows: Einzelne EXE mit PyInstaller (GUI)
 Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), Abhängigkeiten installiert (`pip install -r requirements.txt`).

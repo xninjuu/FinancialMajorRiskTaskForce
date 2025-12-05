@@ -426,6 +426,19 @@ class PersistenceLayer:
         )
         return cursor.fetchall()
 
+    def list_evidence_tags(self) -> list[str]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT tags FROM evidence WHERE tags IS NOT NULL")
+        tags: set[str] = set()
+        for row in cursor.fetchall():
+            if not row[0]:
+                continue
+            for tag in str(row[0]).split(","):
+                tag = tag.strip()
+                if tag:
+                    tags.add(tag)
+        return sorted(tags)
+
     def seal_case(
         self,
         case_id: str,

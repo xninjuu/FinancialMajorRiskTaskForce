@@ -254,6 +254,9 @@ class Database:
     def list_evidence(self, case_id: str):
         return self.persistence.list_evidence(case_id)
 
+    def list_evidence_tags(self) -> list[str]:
+        return self.persistence.list_evidence_tags()
+
     def seal_case(
         self,
         case_id: str,

@@ -39,6 +39,8 @@ from app.ui.components import (
     rich_cell,
     update_pill,
 )
+from app.ui.login_dialog import LoginDialog
+from app.runtime_paths import resolve_runtime_file
 
 
 class SimulationWorker(QtCore.QThread):
@@ -197,6 +199,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.content_stack.addWidget(widget)
 
         self._apply_table_density_all()
+        completer = QtWidgets.QCompleter(self.db.list_evidence_tags())
+        completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        self.evidence_tags.setCompleter(completer)
         self._build_status_bar()
         self._register_shortcuts()
 
@@ -488,6 +493,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.evidence_type.addItems(["document", "screenshot", "note", "export"])
         self.evidence_tags = QtWidgets.QLineEdit()
         self.evidence_tags.setPlaceholderText("tags (comma separated)")
+        self.evidence_filter_type = QtWidgets.QComboBox()
+        self.evidence_filter_type.addItems(["any", "document", "screenshot", "note", "export"])
+        self.evidence_filter_importance = QtWidgets.QComboBox()
+        self.evidence_filter_importance.addItems(["any", "low", "medium", "high"])
         self.evidence_importance = QtWidgets.QComboBox()
         self.evidence_importance.addItems(["low", "medium", "high"])
         self.evidence_add_btn = QtWidgets.QPushButton("Add Evidence")
@@ -499,12 +508,14 @@ class MainWindow(QtWidgets.QMainWindow):
         controls.addWidget(self.evidence_type)
         controls.addWidget(self.evidence_importance)
         controls.addWidget(self.evidence_tags)
+        controls.addWidget(self.evidence_filter_type)
+        controls.addWidget(self.evidence_filter_importance)
         controls.addWidget(self.evidence_seal_reason)
         controls.addWidget(self.evidence_add_btn)
         controls.addWidget(self.evidence_seal_btn)
         controls.addWidget(self.evidence_verify_btn)
         layout.addLayout(controls)
-        self.evidence_table = QtWidgets.QTableWidget(0, 9)
+        self.evidence_table = QtWidgets.QTableWidget(0, 10)
         self.evidence_table.setHorizontalHeaderLabels(
             [
                 "File",
@@ -515,14 +526,19 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Type",
                 "Tags",
                 "Importance",
+                "Preview",
                 "OCR",
             ]
         )
         self.evidence_table.horizontalHeader().setStretchLastSection(True)
+        self.seal_metadata_label = QtWidgets.QLabel("Seal metadata: n/a")
         layout.addWidget(self.evidence_table)
+        layout.addWidget(self.seal_metadata_label)
         self.evidence_add_btn.clicked.connect(self._add_evidence)
         self.evidence_seal_btn.clicked.connect(self._seal_case)
         self.evidence_verify_btn.clicked.connect(self._verify_seal)
+        self.evidence_filter_type.currentTextChanged.connect(self._load_evidence_table)
+        self.evidence_filter_importance.currentTextChanged.connect(self._load_evidence_table)
         return page
 
     def _build_compare(self) -> QtWidgets.QWidget:
@@ -568,10 +584,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_network(self) -> QtWidgets.QWidget:
         page = SectionCard()
         layout = QtWidgets.QVBoxLayout(page)
+        controls = QtWidgets.QHBoxLayout()
         self.network_view = NetworkView(self.db)
-        refresh_btn = QtWidgets.QPushButton("Refresh Graph")
-        refresh_btn.clicked.connect(self.network_view.refresh)
-        layout.addWidget(refresh_btn)
+        self.network_focus = QtWidgets.QLineEdit()
+        self.network_focus.setPlaceholderText("Account ID or country to focus")
+        focus_btn = QtWidgets.QPushButton("Focus")
+        focus_btn.clicked.connect(lambda: self.network_view.set_focus(self.network_focus.text().strip()))
+        clear_btn = QtWidgets.QPushButton("Clear Focus")
+        clear_btn.clicked.connect(lambda: self.network_view.set_focus(None))
+        export_png_btn = QtWidgets.QPushButton("Export PNG")
+        export_svg_btn = QtWidgets.QPushButton("Export SVG")
+        export_png_btn.clicked.connect(self._export_graph_png)
+        export_svg_btn.clicked.connect(self._export_graph_svg)
+        controls.addWidget(self.network_focus)
+        controls.addWidget(focus_btn)
+        controls.addWidget(clear_btn)
+        controls.addWidget(export_png_btn)
+        controls.addWidget(export_svg_btn)
+        layout.addLayout(controls)
         layout.addWidget(self.network_view)
         return page
 
@@ -806,22 +836,53 @@ class MainWindow(QtWidgets.QMainWindow):
         if not case_id:
             self.evidence_table.setRowCount(0)
             return
-        rows = list_evidence(self.db, case_id)
-        self.evidence_table.setRowCount(len(rows))
-        for idx, row in enumerate(rows):
+        seal_record = self.db.sealed_case(case_id)
+        seal_dict = dict(seal_record) if seal_record else None
+        if seal_dict:
+            self.seal_metadata_label.setText(
+                f"Seal: {seal_dict.get('sealed_by')} @ {seal_dict.get('sealed_at')} | reason {seal_dict.get('seal_reason') or 'n/a'} | merkle {seal_dict.get('merkle_root')}"
+            )
+        else:
+            self.seal_metadata_label.setText("Seal metadata: none")
+        rows = [dict(r) for r in list_evidence(self.db, case_id)]
+        filtered: list[dict] = []
+        type_filter = self.evidence_filter_type.currentText()
+        importance_filter = self.evidence_filter_importance.currentText()
+        for row in rows:
+            if type_filter != "any" and row.get("evidence_type") != type_filter:
+                continue
+            if importance_filter != "any" and row.get("importance") != importance_filter:
+                continue
+            filtered.append(row)
+        self.evidence_table.setRowCount(len(filtered))
+        for idx, row in enumerate(filtered):
             values = [
                 row["filename"],
                 row["hash"],
                 row["added_by"],
                 "Yes" if row["sealed"] else "No",
                 row["created_at"],
-                row["evidence_type"] if "evidence_type" in row.keys() else None,
-                row["tags"] if "tags" in row.keys() else None,
-                row["importance"] if "importance" in row.keys() else None,
-                "yes" if (row["ocr_text"] if "ocr_text" in row.keys() else None) else "no",
+                row.get("evidence_type"),
+                row.get("tags"),
+                row.get("importance"),
             ]
             for col, value in enumerate(values):
                 self.evidence_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+            preview_col = 8
+            ocr_col = 9
+            preview_path = row.get("preview_path")
+            if preview_path:
+                pixmap = QtGui.QPixmap(str(preview_path))
+                if not pixmap.isNull():
+                    label = QtWidgets.QLabel()
+                    label.setPixmap(pixmap.scaled(96, 96, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+                    self.evidence_table.setCellWidget(idx, preview_col, label)
+                else:
+                    self.evidence_table.setItem(idx, preview_col, QtWidgets.QTableWidgetItem("-"))
+            else:
+                self.evidence_table.setItem(idx, preview_col, QtWidgets.QTableWidgetItem("-"))
+            ocr_value = "yes" if (row.get("ocr_text")) else "no"
+            self.evidence_table.setItem(idx, ocr_col, QtWidgets.QTableWidgetItem(ocr_value))
 
     def _load_timeline_tab(self):
         case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
@@ -889,6 +950,22 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
 
+    def _export_graph_png(self) -> None:
+        target = resolve_runtime_file("graph_view.png")
+        try:
+            self.network_view.export_png(str(target))
+            QtWidgets.QMessageBox.information(self, "Graph export", f"Graph saved to {target}")
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Graph export", str(exc))
+
+    def _export_graph_svg(self) -> None:
+        target = resolve_runtime_file("graph_view.svg")
+        try:
+            self.network_view.export_svg(str(target))
+            QtWidgets.QMessageBox.information(self, "Graph export", f"Graph saved to {target}")
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Graph export", str(exc))
+
     def _load_selected_customer_kyc(self):
         row = self.customer_table.currentRow()
         if row < 0:
@@ -926,6 +1003,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Evidence stored", f"{filename}\nSHA256: {digest}")
             self.audit.log(self.username, AuditAction.EVIDENCE_ADDED.value, target=case_id, details=filename)
             self._load_evidence_table()
+            completer = QtWidgets.QCompleter(self.db.list_evidence_tags())
+            completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+            self.evidence_tags.setCompleter(completer)
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(self, "Evidence", str(exc))
 
@@ -954,6 +1034,7 @@ class MainWindow(QtWidgets.QMainWindow):
         message = "Seal intact" if ok else "Seal mismatch"
         QtWidgets.QMessageBox.information(self, "Verify seal", message)
         self.audit.log(self.username, AuditAction.CASE_SEALED.value, target=case_id, details=message)
+        self._load_evidence_table()
 
     def _compare_cases(self):
         case_a = sanitize_text(self.compare_case_a.text(), max_length=128)
