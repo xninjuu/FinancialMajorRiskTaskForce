@@ -178,6 +178,35 @@ class Database:
     def record_export(self, case_id: str, path: str, hash_value: str) -> None:
         self.persistence.record_export(case_id, path, hash_value)
 
+    # Extended investigative helpers
+    def record_evidence(self, case_id: str, filename: str, hash_value: str, *, added_by: str, sealed: bool = False) -> None:
+        filename = sanitize_text(filename, max_length=256)
+        added_by = sanitize_text(added_by, max_length=64)
+        self.persistence.record_evidence(case_id, filename, hash_value, added_by=added_by, sealed=sealed)
+
+    def list_evidence(self, case_id: str):
+        return self.persistence.list_evidence(case_id)
+
+    def seal_case(self, case_id: str, hash_value: str, *, sealed_by: str) -> None:
+        sealed_by = sanitize_text(sealed_by, max_length=64)
+        self.persistence.seal_case(case_id, hash_value, sealed_by=sealed_by)
+
+    def sealed_case(self, case_id: str):
+        return self.persistence.sealed_case(case_id)
+
+    def record_correlation(self, alert_id: str, related_id: str, reason: str) -> None:
+        reason = sanitize_text(reason, max_length=200)
+        self.persistence.record_correlation(alert_id, related_id, reason)
+
+    def list_correlations(self, alert_id: str):
+        return self.persistence.list_correlations(alert_id)
+
+    def upsert_baseline(self, customer_id: str, avg_amount: float, tx_count: int) -> None:
+        self.persistence.upsert_baseline(customer_id, avg_amount, tx_count)
+
+    def fetch_baseline(self, customer_id: str):
+        return self.persistence.fetch_baseline(customer_id)
+
     def audit_for_target(self, target: str, *, limit: int = 200):
         cursor = self.conn.cursor()
         cursor.execute(

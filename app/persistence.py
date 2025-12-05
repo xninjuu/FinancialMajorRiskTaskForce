@@ -11,7 +11,7 @@ from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
@@ -34,6 +34,10 @@ class PersistenceLayer:
         cursor.execute("DROP TABLE IF EXISTS transactions")
         cursor.execute("DROP TABLE IF EXISTS case_notes")
         cursor.execute("DROP TABLE IF EXISTS forensic_exports")
+        cursor.execute("DROP TABLE IF EXISTS evidence")
+        cursor.execute("DROP TABLE IF EXISTS sealed_cases")
+        cursor.execute("DROP TABLE IF EXISTS correlations")
+        cursor.execute("DROP TABLE IF EXISTS baselines")
         cursor.execute(
             """
             CREATE TABLE transactions (
@@ -97,6 +101,50 @@ class PersistenceLayer:
                 path TEXT,
                 hash TEXT,
                 created_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id TEXT,
+                filename TEXT,
+                hash TEXT,
+                added_by TEXT,
+                sealed INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE sealed_cases (
+                case_id TEXT PRIMARY KEY,
+                hash TEXT NOT NULL,
+                sealed_at TEXT,
+                sealed_by TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE correlations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id TEXT,
+                related_id TEXT,
+                reason TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE baselines (
+                customer_id TEXT PRIMARY KEY,
+                avg_amount REAL,
+                tx_count INTEGER,
+                updated_at TEXT
             )
             """
         )
@@ -293,6 +341,76 @@ class PersistenceLayer:
             (case_id, path, hash_value, datetime.utcnow().isoformat()),
         )
         self.conn.commit()
+
+    def record_evidence(self, case_id: str, filename: str, hash_value: str, *, added_by: str, sealed: bool = False) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO evidence (case_id, filename, hash, added_by, sealed, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (case_id, filename, hash_value, added_by, int(sealed), datetime.utcnow().isoformat()),
+        )
+        self.conn.commit()
+
+    def list_evidence(self, case_id: str) -> list[sqlite3.Row]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT id, filename, hash, added_by, sealed, created_at FROM evidence WHERE case_id = ? ORDER BY datetime(created_at) DESC",
+            (case_id,),
+        )
+        return cursor.fetchall()
+
+    def seal_case(self, case_id: str, hash_value: str, *, sealed_by: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO sealed_cases (case_id, hash, sealed_at, sealed_by) VALUES (?, ?, ?, ?)",
+            (case_id, hash_value, datetime.utcnow().isoformat(), sealed_by),
+        )
+        self.conn.commit()
+
+    def sealed_case(self, case_id: str) -> sqlite3.Row | None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT case_id, hash, sealed_at, sealed_by FROM sealed_cases WHERE case_id = ?", (case_id,))
+        return cursor.fetchone()
+
+    def record_correlation(self, alert_id: str, related_id: str, reason: str) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO correlations (alert_id, related_id, reason, created_at) VALUES (?, ?, ?, ?)",
+            (alert_id, related_id, reason, datetime.utcnow().isoformat()),
+        )
+        self.conn.commit()
+
+    def list_correlations(self, alert_id: str) -> list[sqlite3.Row]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT related_id, reason, created_at FROM correlations WHERE alert_id = ? ORDER BY datetime(created_at) DESC",
+            (alert_id,),
+        )
+        return cursor.fetchall()
+
+    def upsert_baseline(self, customer_id: str, avg_amount: float, tx_count: int) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO baselines (customer_id, avg_amount, tx_count, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(customer_id) DO UPDATE SET
+                avg_amount=excluded.avg_amount,
+                tx_count=excluded.tx_count,
+                updated_at=excluded.updated_at
+            """,
+            (customer_id, avg_amount, tx_count, datetime.utcnow().isoformat()),
+        )
+        self.conn.commit()
+
+    def fetch_baseline(self, customer_id: str) -> sqlite3.Row | None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT customer_id, avg_amount, tx_count, updated_at FROM baselines WHERE customer_id = ?", (customer_id,)
+        )
+        return cursor.fetchone()
 
     def _row_to_transaction(self, row: sqlite3.Row) -> Transaction:
         return Transaction(

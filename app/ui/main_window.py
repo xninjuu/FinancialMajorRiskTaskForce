@@ -3,17 +3,25 @@ from __future__ import annotations
 import itertools
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6 import QtCore, QtWidgets
 
 from app.config_loader import safe_load_indicators, safe_load_thresholds, resolve_indicator_path, resolve_threshold_path
 from app.config.settings import AppSettings
+from app.core.baseline_engine import BaselineEngine
+from app.core.entity_resolution import deduplicate
+from app.core.event_correlation import CorrelationEngine
+from app.core.export_bridge import export_case_json
+from app.core.exporter import export_case_bundle
+from app.core.kyc_risk import evaluate_customer
+from app.core.sealed_case import seal_case
+from app.core.secure_clipboard import SecureClipboard
+from app.core.validation import sanitize_text, validate_role
+from app.core.evidence_locker import add_evidence, list_evidence
 from app.domain import Alert, Case, CaseNote, CaseStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
-from app.core.validation import sanitize_text, validate_role
-from app.core.kyc_risk import evaluate_customer
-from app.core.exporter import export_case_bundle
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
@@ -32,6 +40,7 @@ class SimulationWorker(QtCore.QThread):
         self.thresholds = thresholds
         self.accounts_map = accounts
         self._tx_cycle = itertools.cycle(self._build_tx_queue())
+        self.correlations = CorrelationEngine(db)
 
     def _build_tx_queue(self) -> List[Transaction]:
         customers = make_customers()
@@ -69,6 +78,21 @@ class SimulationWorker(QtCore.QThread):
                     alert.case_id = case.id
                     self.db.record_case(case)
                 self.db.record_alert(alert, risk_level)
+                existing_alerts = []
+                for row in self.db.list_alerts(limit=25):
+                    tx_row = self.db.get_transaction(row["transaction_id"])
+                    if not tx_row:
+                        continue
+                    existing_alerts.append(
+                        Alert(
+                            id=row["id"],
+                            transaction=tx_row,
+                            score=row["score"],
+                            evaluated_indicators=[],
+                            created_at=datetime.fromisoformat(row["created_at"]),
+                        )
+                    )
+                self.correlations.correlate([alert, *existing_alerts])
                 self.alert_ready.emit(
                     {
                         "id": alert.id,
@@ -104,6 +128,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_activity = datetime.utcnow()
         self.tamper_warnings = tamper_warnings or []
         self.settings = settings
+        self.baselines = BaselineEngine(db)
+        self.correlations = CorrelationEngine(db)
+        self.clipboard = SecureClipboard(self)
 
         self.setWindowTitle("FMR TaskForce Codex - Desktop")
         self.resize(1200, 800)
@@ -118,6 +145,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.network_tab = QtWidgets.QWidget()
         self.customers_tab = QtWidgets.QWidget()
         self.kyc_tab = QtWidgets.QWidget()
+        self.evidence_tab = QtWidgets.QWidget()
+        self.compare_tab = QtWidgets.QWidget()
+        self.cluster_tab = QtWidgets.QWidget()
+        self.actor_tab = QtWidgets.QWidget()
         self.security_tab = QtWidgets.QWidget()
         self.settings_tab = QtWidgets.QWidget()
 
@@ -125,9 +156,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(self.alerts_tab, "Alerts")
         self.tabs.addTab(self.cases_tab, "Cases")
         self.tabs.addTab(self.timeline_tab, "Case Timeline")
+        self.tabs.addTab(self.evidence_tab, "Evidence")
+        self.tabs.addTab(self.compare_tab, "Compare Cases")
+        self.tabs.addTab(self.cluster_tab, "Alert Clusters")
         self.tabs.addTab(self.customers_tab, "Customers / Accounts")
         self.tabs.addTab(self.kyc_tab, "KYC Risk")
         self.tabs.addTab(self.network_tab, "Network")
+        self.tabs.addTab(self.actor_tab, "Actors")
         self.tabs.addTab(self.security_tab, "Security / Audit")
         self.tabs.addTab(self.settings_tab, "Settings")
 
@@ -135,9 +170,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_alerts()
         self._build_cases()
         self._build_timeline()
+        self._build_evidence()
+        self._build_compare()
+        self._build_clusters()
         self._build_customers()
         self._build_kyc()
         self._build_network()
+        self._build_actor()
         self._build_security()
         self._build_settings()
 
@@ -248,6 +287,62 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.kyc_table)
         self.kyc_tab.setLayout(layout)
 
+    def _build_evidence(self):
+        layout = QtWidgets.QVBoxLayout()
+        controls = QtWidgets.QHBoxLayout()
+        self.evidence_case_input = QtWidgets.QLineEdit()
+        self.evidence_case_input.setPlaceholderText("Case ID")
+        self.evidence_add_btn = QtWidgets.QPushButton("Add Evidence")
+        self.evidence_seal_btn = QtWidgets.QPushButton("Seal Case")
+        controls.addWidget(self.evidence_case_input)
+        controls.addWidget(self.evidence_add_btn)
+        controls.addWidget(self.evidence_seal_btn)
+        layout.addLayout(controls)
+        self.evidence_table = QtWidgets.QTableWidget(0, 5)
+        self.evidence_table.setHorizontalHeaderLabels(["File", "Hash", "Added By", "Sealed", "Created"])
+        self.evidence_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.evidence_table)
+        self.evidence_tab.setLayout(layout)
+        self.evidence_add_btn.clicked.connect(self._add_evidence)
+        self.evidence_seal_btn.clicked.connect(self._seal_case)
+
+    def _build_compare(self):
+        layout = QtWidgets.QVBoxLayout()
+        inputs = QtWidgets.QHBoxLayout()
+        self.compare_case_a = QtWidgets.QLineEdit()
+        self.compare_case_a.setPlaceholderText("Case A")
+        self.compare_case_b = QtWidgets.QLineEdit()
+        self.compare_case_b.setPlaceholderText("Case B")
+        self.compare_btn = QtWidgets.QPushButton("Compare")
+        self.copy_compare_btn = QtWidgets.QPushButton("Copy Summary")
+        inputs.addWidget(self.compare_case_a)
+        inputs.addWidget(self.compare_case_b)
+        inputs.addWidget(self.compare_btn)
+        inputs.addWidget(self.copy_compare_btn)
+        self.compare_text = QtWidgets.QTextEdit()
+        self.compare_text.setReadOnly(True)
+        layout.addLayout(inputs)
+        layout.addWidget(self.compare_text)
+        self.compare_tab.setLayout(layout)
+        self.compare_btn.clicked.connect(self._compare_cases)
+        self.copy_compare_btn.clicked.connect(self._copy_compare)
+
+    def _build_clusters(self):
+        layout = QtWidgets.QVBoxLayout()
+        self.cluster_table = QtWidgets.QTableWidget(0, 4)
+        self.cluster_table.setHorizontalHeaderLabels(["Domain", "Risk", "Count", "Latest"])
+        self.cluster_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.cluster_table)
+        self.cluster_tab.setLayout(layout)
+
+    def _build_actor(self):
+        layout = QtWidgets.QVBoxLayout()
+        self.actor_table = QtWidgets.QTableWidget(0, 4)
+        self.actor_table.setHorizontalHeaderLabels(["Customer", "Alerts", "Cases", "Baseline Avg"])
+        self.actor_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.actor_table)
+        self.actor_tab.setLayout(layout)
+
     def _build_network(self):
         layout = QtWidgets.QVBoxLayout()
         self.network_view = NetworkView(self.db)
@@ -291,6 +386,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_cases()
         self._load_customers()
         self._load_audit()
+        self._load_clusters()
+        self._load_actor()
+        self._load_evidence_table()
         self.network_view.refresh()
 
     def _load_dashboard(self):
@@ -340,6 +438,55 @@ class MainWindow(QtWidgets.QMainWindow):
             for col, value in enumerate(values):
                 self.audit_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
 
+    def _load_clusters(self):
+        rows = self.db.list_alerts(limit=200)
+        clusters: Dict[tuple[str, str], list[str]] = {}
+        latest: Dict[tuple[str, str], str] = {}
+        for row in rows:
+            key = (row["domain"], row["risk_level"])
+            clusters.setdefault(key, []).append(row["id"])
+            latest[key] = row["created_at"]
+        self.cluster_table.setRowCount(len(clusters))
+        for idx, ((domain, risk), alert_ids) in enumerate(clusters.items()):
+            values = [domain, risk, len(alert_ids), latest.get((domain, risk), "")]
+            for col, value in enumerate(values):
+                self.cluster_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+
+    def _load_actor(self):
+        customers = make_customers()
+        accounts = make_accounts(customers)
+        account_to_customer = {a.id: a.customer_id for a in accounts}
+        alerts = self.db.list_alerts(limit=300)
+        cases = self.db.list_cases()
+        counts: Dict[str, Dict[str, int]] = {}
+        for alert in alerts:
+            tx = self.db.get_transaction(alert["transaction_id"])
+            cust_id = account_to_customer.get(tx.account_id, "unknown") if tx else "unknown"
+            bucket = counts.setdefault(cust_id, {"alerts": 0, "cases": 0})
+            bucket["alerts"] += 1
+        for case in cases:
+            bucket = counts.setdefault(case["id"], {"alerts": 0, "cases": 0})
+            bucket["cases"] += 1
+        self.actor_table.setRowCount(len(customers))
+        for idx, cust in enumerate(customers):
+            baseline = self.baselines.fetch(cust.id)
+            stats = counts.get(cust.id, {"alerts": 0, "cases": 0})
+            values = [cust.name, stats["alerts"], stats["cases"], f"{(baseline.avg_amount if baseline else 0):.0f}"]
+            for col, value in enumerate(values):
+                self.actor_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+
+    def _load_evidence_table(self):
+        case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
+        if not case_id:
+            self.evidence_table.setRowCount(0)
+            return
+        rows = list_evidence(self.db, case_id)
+        self.evidence_table.setRowCount(len(rows))
+        for idx, row in enumerate(rows):
+            values = [row["filename"], row["hash"], row["added_by"], "Yes" if row["sealed"] else "No", row["created_at"]]
+            for col, value in enumerate(values):
+                self.evidence_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+
     def _load_timeline_tab(self):
         case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
         if not case_id:
@@ -386,10 +533,11 @@ class MainWindow(QtWidgets.QMainWindow):
         case_id = self.case_table.item(row, 0).text()
         try:
             path, hash_value = export_case_bundle(self.db, case_id, self.settings.exports_dir)
+            json_path = export_case_json(self.db, case_id, self.settings.exports_dir)
             QtWidgets.QMessageBox.information(
                 self,
                 "Export complete",
-                f"Case exported to {path}\nSHA256: {hash_value}",
+                f"Case exported to {path}\nJSON: {json_path}\nSHA256: {hash_value}",
             )
             self.audit.log(self.username, AuditAction.SETTINGS_CHANGE.value, target=case_id, details="Forensic export")
         except Exception as exc:  # noqa: BLE001
@@ -409,6 +557,54 @@ class MainWindow(QtWidgets.QMainWindow):
             self.kyc_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(dim.name))
             self.kyc_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(dim.score)))
             self.kyc_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(dim.rationale))
+
+    def _add_evidence(self):
+        case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
+        if not case_id:
+            QtWidgets.QMessageBox.warning(self, "Case", "Provide a case ID")
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select evidence file")
+        if not path:
+            return
+        try:
+            filename, digest = add_evidence(self.db, case_id, Path(path), self.username)
+            QtWidgets.QMessageBox.information(self, "Evidence stored", f"{filename}\nSHA256: {digest}")
+            self.audit.log(self.username, AuditAction.EVIDENCE_ADDED.value, target=case_id, details=filename)
+            self._load_evidence_table()
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Evidence", str(exc))
+
+    def _seal_case(self):
+        case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
+        if not case_id:
+            return
+        try:
+            _, digest = seal_case(self.db, case_id, sealed_by=self.username)
+            QtWidgets.QMessageBox.information(self, "Case sealed", f"Hash: {digest}")
+            self.audit.log(self.username, AuditAction.CASE_SEALED.value, target=case_id, details="sealed")
+            self._load_evidence_table()
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(self, "Seal", str(exc))
+
+    def _compare_cases(self):
+        case_a = sanitize_text(self.compare_case_a.text(), max_length=128)
+        case_b = sanitize_text(self.compare_case_b.text(), max_length=128)
+        if not case_a or not case_b:
+            return
+        alerts_a = {a["id"] for a in self.db.alerts_for_case(case_a)}
+        alerts_b = {b["id"] for b in self.db.alerts_for_case(case_b)}
+        overlap = alerts_a & alerts_b
+        summary = [
+            f"Case A alerts: {len(alerts_a)}",
+            f"Case B alerts: {len(alerts_b)}",
+            f"Overlap: {len(overlap)}",
+            f"Shared IDs: {', '.join(sorted(overlap)) if overlap else 'None'}",
+        ]
+        self.compare_text.setText("\n".join(summary))
+        self.audit.log(self.username, AuditAction.SETTINGS_CHANGE.value, target=f"compare:{case_a}:{case_b}", details="case compare")
+
+    def _copy_compare(self):
+        self.clipboard.copy(self.compare_text.toPlainText())
 
     def eventFilter(self, source, event):
         if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.KeyPress}:

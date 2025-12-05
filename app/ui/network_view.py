@@ -40,4 +40,9 @@ class NetworkView(QtWidgets.QGraphicsView):
             row = (row + 1) % 6
             if row == 0:
                 y_offset += 20
+        correlation_total = 0
+        for alert_row in self.db.list_alerts(limit=50):
+            correlation_total += len(self.db.list_correlations(alert_row["id"]))
+        summary = scene.addText(f"Correlations recorded: {correlation_total}")
+        summary.setPos(20, y_offset + (row + 1) * 70)
         scene.setSceneRect(scene.itemsBoundingRect())

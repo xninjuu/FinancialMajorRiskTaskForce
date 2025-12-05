@@ -207,6 +207,13 @@ Da die ursprüngliche .NET-Umgebung in diesem Workspace nicht verfügbar ist, li
    - Die GUI läuft offline; es wird **kein** Webserver gestartet.
 4) Tests: `python -m pytest`
 
+### Investigator-Tools (Desktop)
+- Evidence-Locker mit Hashing/Sealing (Tab "Evidence")
+- Case-Compare & Alert-Cluster-View für Überschneidungen
+- Actor-Dashboard mit Basislinien/Counts je Kunde
+- Netzwerk-Graph mit Korrelationen + Timeline-Dialog
+- Forensic-Export (JSON/PDF/ZIP) inkl. Hash-Logging
+
 ### Windows: Einzelne EXE mit PyInstaller (GUI)
 Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), Abhängigkeiten installiert (`pip install -r requirements.txt`).
 
