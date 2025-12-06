@@ -17,6 +17,7 @@ class Database:
         self.persistence = PersistenceLayer(str(db_path))
         self.conn: sqlite3.Connection = self.persistence.conn
         self._init_security_tables()
+        self._timeline_cache: dict[str, list[dict]] = {}
 
     def _init_security_tables(self) -> None:
         cursor = self.conn.cursor()
@@ -180,11 +181,19 @@ class Database:
     def record_transaction(self, tx: Transaction) -> None:
         self.persistence.record_transaction(tx)
 
-    def record_alert(self, *args, **kwargs) -> None:
-        self.persistence.record_alert(*args, **kwargs)
+    def _invalidate_timeline(self, case_id: str | None) -> None:
+        if case_id:
+            self._timeline_cache.pop(case_id, None)
+        else:
+            self._timeline_cache.clear()
 
-    def record_case(self, *args, **kwargs) -> None:
-        self.persistence.record_case(*args, **kwargs)
+    def record_alert(self, alert, risk_level: str) -> None:
+        self.persistence.record_alert(alert, risk_level)
+        self._invalidate_timeline(getattr(alert, "case_id", None))
+
+    def record_case(self, case, *args, **kwargs) -> None:
+        self.persistence.record_case(case, *args, **kwargs)
+        self._invalidate_timeline(getattr(case, "id", None))
 
     def list_alerts(self, *args, **kwargs):
         return self.persistence.list_alerts(*args, **kwargs)
@@ -340,7 +349,11 @@ class Database:
         )
         return cursor.fetchall()
 
-    def case_timeline(self, case_id: str, limit: int | None = None):
+    def case_timeline(self, case_id: str, limit: int | None = 400):
+        cached = self._timeline_cache.get(case_id)
+        if cached:
+            return cached[-limit:] if limit else list(cached)
+
         events: list[dict] = []
         for alert_row in self.alerts_for_case(case_id):
             alert = dict(alert_row)
@@ -388,7 +401,14 @@ class Database:
                 }
             )
         events.sort(key=lambda e: e.get("timestamp") or "")
-        return events[-limit:] if limit else events
+
+        if limit:
+            cached_events = events[-800:]
+            self._timeline_cache[case_id] = cached_events
+            return events[-limit:]
+
+        self._timeline_cache[case_id] = events
+        return events
 
     def attach_note(self, case_id: str, note: CaseNote) -> None:
         row = self.get_case(case_id)
@@ -412,12 +432,15 @@ class Database:
 
     def set_case_policy(self, case_id: str, band: str, triggers: list[str], explanations: list[str]) -> None:
         self.persistence.update_case_policy(case_id, band, triggers, explanations)
+        self._invalidate_timeline(case_id)
 
     def assign_case(self, case_id: str, assignee: str | None) -> None:
         self.persistence.update_case_assignee(case_id, assignee)
+        self._invalidate_timeline(case_id)
 
     def set_case_policy_flag(self, case_id: str, flagged: bool) -> None:
         self.persistence.set_case_policy_flag(case_id, flagged)
+        self._invalidate_timeline(case_id)
 
     def update_case_status(self, case_id: str, status: str, label: str | None = None) -> None:
         row = self.get_case(case_id)
@@ -439,3 +462,4 @@ class Database:
             notes=notes,
         )
         self.record_case(case)
+        self._invalidate_timeline(case_id)
