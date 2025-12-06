@@ -410,6 +410,15 @@ class Database:
         )
         self.record_case(case)
 
+    def set_case_policy(self, case_id: str, band: str, triggers: list[str], explanations: list[str]) -> None:
+        self.persistence.update_case_policy(case_id, band, triggers, explanations)
+
+    def assign_case(self, case_id: str, assignee: str | None) -> None:
+        self.persistence.update_case_assignee(case_id, assignee)
+
+    def set_case_policy_flag(self, case_id: str, flagged: bool) -> None:
+        self.persistence.set_case_policy_flag(case_id, flagged)
+
     def update_case_status(self, case_id: str, status: str, label: str | None = None) -> None:
         row = self.get_case(case_id)
         if not row:

@@ -106,6 +106,11 @@ class Case:
     status: CaseStatus = CaseStatus.OPEN
     label: CaseLabel | None = None
     priority: str = "Normal"
+    band: str | None = None
+    policy_triggers: List[str] = field(default_factory=list)
+    policy_explanations: List[str] = field(default_factory=list)
+    assignee: str | None = None
+    policy_flag: bool = False
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     notes: List[CaseNote] = field(default_factory=list)

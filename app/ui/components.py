@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 ThemeName = Literal["dark", "light"]
 PillState = Literal["alert", "warning", "success", "info", "neutral"]
+BandName = Literal["GREEN", "YELLOW", "RED", "UNKNOWN"]
 DensityMode = Literal["Compact", "Comfortable", "Expanded"]
 
 
@@ -21,20 +22,20 @@ class ThemeTokens:
 
 
 tokens_dark = ThemeTokens(
-    bg="#1b1d23",
-    card="#23262d",
-    border="#2c2f36",
-    accent="#21d4fd",
-    text="#e5e7eb",
-    muted="#9ca3af",
+    bg="#0b0b0d",
+    card="#121317",
+    border="#1c1e24",
+    accent="#d72638",
+    text="#f5f7fa",
+    muted="#b1b5bd",
 )
 
 tokens_light = ThemeTokens(
     bg="#f7f8fb",
     card="#ffffff",
     border="#d1d5db",
-    accent="#2563eb",
-    text="#111827",
+    accent="#d72638",
+    text="#0b0b0d",
     muted="#4b5563",
 )
 
@@ -44,11 +45,25 @@ THEME_TOKENS: dict[ThemeName, ThemeTokens] = {
 }
 
 PILL_COLORS: dict[PillState, str] = {
-    "alert": "#ef4444",
-    "warning": "#f7a400",
-    "success": "#21d4fd",
-    "info": "#8ab4f8",
-    "neutral": "#4b5563",
+    "alert": "#e74c3c",
+    "warning": "#f1c40f",
+    "success": "#2ecc71",
+    "info": "#d72638",
+    "neutral": "#7f8c8d",
+}
+
+BAND_COLORS: dict[BandName, str] = {
+    "GREEN": "#2ecc71",
+    "YELLOW": "#f1c40f",
+    "RED": "#e74c3c",
+    "UNKNOWN": "#7f8c8d",
+}
+
+SEVERITY_COLORS: dict[str, str] = {
+    "High": "#e74c3c",
+    "Medium": "#f1c40f",
+    "Low": "#2ecc71",
+    "Unknown": "#7f8c8d",
 }
 
 CURRENT_THEME: ThemeName = "dark"
@@ -88,12 +103,14 @@ def _build_base_style(tokens: ThemeTokens) -> str:
     QPushButton {{
         background-color: {tokens.card};
         border: 1px solid {tokens.border};
-        border-radius: 8px;
-        padding: 8px 12px;
+        border-radius: 10px;
+        padding: 9px 14px;
+        font-weight: 600;
     }}
 
     QPushButton:hover {{
         border-color: {tokens.accent};
+        color: {tokens.text};
     }}
 
     QHeaderView::section {{
@@ -186,6 +203,32 @@ def create_pill(text: str, state: PillState = "neutral") -> QtWidgets.QLabel:
 def update_pill(label: QtWidgets.QLabel, text: str, state: PillState) -> None:
     label.setText(text)
     _style_pill(label, state)
+
+
+def create_band_pill(band: str) -> QtWidgets.QLabel:
+    normalized = band.upper() if band else "UNKNOWN"
+    color = BAND_COLORS.get(normalized, BAND_COLORS["UNKNOWN"])
+    label = QtWidgets.QLabel(normalized.title())
+    label.setAlignment(QtCore.Qt.AlignCenter)
+    label.setStyleSheet(
+        "padding: 4px 10px;"
+        "border-radius: 12px;"
+        f"background: {color};"
+        "color: #0b0c10;"
+        "font-weight: 700;"
+        "font-size: 11px;"
+    )
+    return label
+
+
+def band_color(band: str) -> str:
+    normalized = band.upper() if band else "UNKNOWN"
+    return BAND_COLORS.get(normalized, BAND_COLORS["UNKNOWN"])
+
+
+def severity_color(level: str) -> str:
+    normalized = level.title() if level else "Unknown"
+    return SEVERITY_COLORS.get(normalized, SEVERITY_COLORS["Unknown"])
 
 
 def create_header_pill(text: str, state: PillState = "info") -> QtWidgets.QLabel:

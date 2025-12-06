@@ -13,6 +13,7 @@ a = Analysis(
     datas=[
         ('config/indicators.json', 'config'),
         ('config/thresholds.json', 'config'),
+        ('config/policies.json', 'config'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

@@ -12,7 +12,7 @@ from .runtime_paths import ensure_parent_dir
 
 
 class PersistenceLayer:
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
 
     def __init__(self, db_path: str = "codex.db") -> None:
         self.db_path = Path(db_path)
@@ -67,7 +67,12 @@ class PersistenceLayer:
                 label TEXT,
                 priority TEXT,
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                band TEXT,
+                policy_triggers TEXT,
+                policy_explanations TEXT,
+                assignee TEXT,
+                policy_flag INTEGER DEFAULT 0
             )
             """
         )
@@ -231,8 +236,8 @@ class PersistenceLayer:
             cursor = self.conn.cursor()
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO cases (id, status, label, priority, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO cases (id, status, label, priority, created_at, updated_at, band, policy_triggers, policy_explanations, assignee, policy_flag)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case.id,
@@ -241,6 +246,11 @@ class PersistenceLayer:
                     case.priority,
                     case.created_at.isoformat(),
                     case.updated_at.isoformat(),
+                    case.band,
+                    ",".join(case.policy_triggers) if getattr(case, "policy_triggers", None) else None,
+                    "\n".join(case.policy_explanations) if getattr(case, "policy_explanations", None) else None,
+                    case.assignee,
+                    1 if getattr(case, "policy_flag", False) else 0,
                 ),
             )
             self.conn.commit()
@@ -258,6 +268,31 @@ class PersistenceLayer:
                     """,
                     (case.id, note.author, note.message, note.created_at.isoformat()),
                 )
+            self.conn.commit()
+
+    def update_case_policy(self, case_id: str, band: str, triggers: list[str], explanations: list[str]) -> None:
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                UPDATE cases
+                SET band = ?, policy_triggers = ?, policy_explanations = ?
+                WHERE id = ?
+                """,
+                (band, ",".join(triggers) if triggers else None, "\n".join(explanations) if explanations else None, case_id),
+            )
+            self.conn.commit()
+
+    def update_case_assignee(self, case_id: str, assignee: str | None) -> None:
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE cases SET assignee = ? WHERE id = ?", (assignee, case_id))
+            self.conn.commit()
+
+    def set_case_policy_flag(self, case_id: str, flagged: bool) -> None:
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE cases SET policy_flag = ? WHERE id = ?", (1 if flagged else 0, case_id))
             self.conn.commit()
 
     def record_alert(self, alert: Alert, risk_level: str) -> None:

@@ -13,7 +13,7 @@ class LoginDialog(QtWidgets.QDialog):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None, *, demo_hint: str | None = None) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("FMR TaskForce – Sicherer Login")
+        self.setWindowTitle("FMRTF – Financial Major Risk Task Force")
         self.setModal(True)
         self.setSizeGripEnabled(False)
         self.setMinimumWidth(420)
@@ -73,7 +73,7 @@ class LoginDialog(QtWidgets.QDialog):
         card = QtWidgets.QFrame()
         card.setObjectName("card")
 
-        title = QtWidgets.QLabel("FMR TaskForce")
+        title = QtWidgets.QLabel("Financial Major Risk Task Force")
         title.setFont(QtGui.QFont("Segoe UI", 18, QtGui.QFont.Bold))
 
         subtitle = QtWidgets.QLabel("Sicherer Analysten-Zugang")

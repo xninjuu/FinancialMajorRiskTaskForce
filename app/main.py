@@ -60,12 +60,14 @@ def main() -> None:
     app_state = AppState()
     bootstrap = AppBootstrap(db)
     engine, thresholds = bootstrap.build_risk_engine()
+    policy_engine = bootstrap.build_policy_engine()
     window = MainWindow(
         db=db,
         audit=audit,
         auth=auth,
         username=username,
         role=role or "ANALYST",
+        policy_engine=policy_engine,
         session_timeout_minutes=settings.session_timeout_minutes,
         tamper_warnings=tamper_result.warnings,
         settings=settings,

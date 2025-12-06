@@ -22,6 +22,7 @@ from app.core.validation import sanitize_text, validate_role
 from app.core.evidence_locker import add_evidence, list_evidence
 from app.domain import Alert, Case, CaseNote, CaseStatus, Task, TaskStatus, Transaction
 from app.risk_engine import RiskScoringEngine, RiskThresholds
+from app.core.policy_engine import PolicyEngine
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
@@ -34,9 +35,12 @@ from app.ui.components import (
     SectionCard,
     apply_table_density,
     apply_theme,
+    band_color,
     create_header_pill,
+    create_band_pill,
     create_pill,
     create_section_header,
+    severity_color,
     rich_cell,
     update_pill,
 )
@@ -146,6 +150,7 @@ class MainWindow(QtWidgets.QMainWindow):
         auth: AuthService,
         username: str,
         role: str,
+        policy_engine: PolicyEngine,
         session_timeout_minutes: int = 15,
         tamper_warnings: Optional[List[str]] = None,
         settings: Optional[AppSettings] = None,
@@ -157,6 +162,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auth = auth
         self.username = username
         self.role = role
+        self.policy_engine = policy_engine
         saved_timeout = int(self._load_pref("ui.session_timeout", str(session_timeout_minutes)))
         self.session_timeout = timedelta(minutes=saved_timeout)
         self.last_activity = datetime.utcnow()
@@ -175,7 +181,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.account_to_customer = {a.id: a.customer_id for a in self.accounts_cache}
         self._refresh_pending = False
 
-        self.setWindowTitle("FMR TaskForce Codex - Desktop")
+        self.setWindowTitle("FMRTF – Financial Major Risk Task Force")
         self.resize(1200, 800)
 
         apply_theme(self, self.theme)
@@ -190,7 +196,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.nav_list.setFixedWidth(220)
         self.nav_list.setObjectName("navList")
         self.nav_list.setStyleSheet(
-            "QListWidget#navList { background:#1b1d23; color:#e5e7eb; border-right:1px solid #2c2f36; }"
+            "QListWidget#navList { background:#0b0b0d; color:#f5f7fa; border-right:1px solid #1c1e24; }"
+            "QListWidget::item:selected{ background:#d72638; color:#ffffff; border-radius:10px; margin:4px; padding:8px; }"
+            "QListWidget::item{ padding:8px; margin:2px; }"
         )
         root_layout.addWidget(self.nav_list)
 
@@ -324,11 +332,20 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             return default
 
+    def _log_case_action(self, action: AuditAction, case_id: str, details: str | None = None) -> None:
+        self.audit.log_case_action(
+            username=self.username,
+            action=action.value if isinstance(action, AuditAction) else str(action),
+            case_id=case_id,
+            role=self.role,
+            details=details,
+        )
+
     def _build_header_bar(self) -> QtWidgets.QWidget:
         bar = SectionCard()
         layout = QtWidgets.QHBoxLayout(bar)
         layout.setContentsMargins(12, 8, 12, 8)
-        title = QtWidgets.QLabel("FMR TaskForce – Investigator Workspace")
+        title = QtWidgets.QLabel("Financial Major Risk Task Force – Investigator Workspace")
         title.setStyleSheet("font-size:18px; font-weight:700;")
         layout.addWidget(title)
 
@@ -401,17 +418,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         controls = QtWidgets.QHBoxLayout()
         self.case_refresh_btn = QtWidgets.QPushButton("Refresh")
-        self.case_close_btn = QtWidgets.QPushButton("Close Case")
+        self.case_assign_btn = QtWidgets.QPushButton("Assign")
+        self.case_status_combo = QtWidgets.QComboBox()
+        self.case_status_combo.addItems([s.name for s in CaseStatus])
+        self.case_status_apply = QtWidgets.QPushButton("Update Status")
         self.case_timeline_btn = QtWidgets.QPushButton("Open Timeline")
         self.case_export_btn = QtWidgets.QPushButton("Forensic Export")
+        self.case_policy_btn = QtWidgets.QPushButton("Toggle Policy Flag")
         self.case_panel_toggle = QtWidgets.QPushButton("Toggle Details")
         self.case_redacted = QtWidgets.QCheckBox("Redacted")
         self.case_watermark = QtWidgets.QLineEdit()
         self.case_watermark.setPlaceholderText("Watermark")
         controls.addWidget(self.case_refresh_btn)
-        controls.addWidget(self.case_close_btn)
+        controls.addWidget(self.case_assign_btn)
+        controls.addWidget(QtWidgets.QLabel("Status"))
+        controls.addWidget(self.case_status_combo)
+        controls.addWidget(self.case_status_apply)
         controls.addWidget(self.case_timeline_btn)
         controls.addWidget(self.case_export_btn)
+        controls.addWidget(self.case_policy_btn)
         controls.addWidget(self.case_panel_toggle)
         controls.addWidget(self.case_redacted)
         controls.addWidget(self.case_watermark)
@@ -424,9 +449,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         left_panel = SectionCard()
         left_layout = QtWidgets.QVBoxLayout(left_panel)
-        left_layout.addWidget(create_section_header("Cases", accent="#8ab4f8"))
-        self.case_table = QtWidgets.QTableWidget(0, 5)
-        self.case_table.setHorizontalHeaderLabels(["Case ID", "Status", "Priority", "Created", "Updated"])
+        left_layout.addWidget(create_section_header("Cases", accent="#d72638"))
+        self.case_table = QtWidgets.QTableWidget(0, 6)
+        self.case_table.setHorizontalHeaderLabels(["Case ID", "Band", "Status", "Priority", "Created", "Updated"])
         self.case_table.horizontalHeader().setStretchLastSection(True)
         self.case_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         left_layout.addWidget(self.case_table)
@@ -444,9 +469,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         header_row = QtWidgets.QHBoxLayout()
         self.case_title = QtWidgets.QLabel("Select a case")
+        self.case_band_pill = create_band_pill("Unknown")
         self.case_status_pill = create_pill("Unknown", "neutral")
         header_row.addWidget(self.case_title)
         header_row.addStretch(1)
+        header_row.addWidget(self.case_band_pill)
         header_row.addWidget(self.case_status_pill)
         right_layout.addLayout(header_row)
 
@@ -469,12 +496,15 @@ class MainWindow(QtWidgets.QMainWindow):
         outer.addWidget(splitter)
 
         self.case_refresh_btn.clicked.connect(lambda: self._load_cases())
-        self.case_close_btn.clicked.connect(lambda: self._close_selected_case())
+        self.case_assign_btn.clicked.connect(self._assign_case)
+        self.case_status_apply.clicked.connect(self._update_case_status)
         self.case_timeline_btn.clicked.connect(lambda: self._open_timeline())
         self.case_export_btn.clicked.connect(lambda: self._export_case())
+        self.case_policy_btn.clicked.connect(self._toggle_policy_flag)
         self.case_panel_toggle.clicked.connect(self._toggle_case_detail_panel)
         self.case_notes.installEventFilter(self)
         self.case_table.itemSelectionChanged.connect(self._load_case_details)
+        self.case_table.cellClicked.connect(self._on_case_clicked)
         splitter.splitterMoved.connect(self._persist_case_split)
         self._restore_case_split()
 
@@ -833,25 +863,41 @@ class MainWindow(QtWidgets.QMainWindow):
         apply_table_density(self.alert_table, mode)
 
     def _load_cases(self, rows: Optional[list[dict]] = None):
-        rows = self.db.list_cases() if rows is None else rows
-        if isinstance(rows, bool):
-            rows = []
+        raw_rows = self.db.list_cases() if rows is None else rows
+        rows_list = [dict(r) for r in raw_rows] if raw_rows else []
         table = self.case_table
         table.setUpdatesEnabled(False)
-        table.setRowCount(len(rows))
-        for idx, row in enumerate(rows):
-            values = [row["id"], row["status"], row["priority"], row["created_at"], row["updated_at"]]
+        table.setRowCount(len(rows_list))
+        for idx, row in enumerate(rows_list):
+            alerts = self.db.alerts_for_case(row["id"])
+            stored_band = row.get("band") if isinstance(row, dict) else None
+            policy_result = self.policy_engine.evaluate_case(row, alerts)
+            self.db.set_case_policy(row["id"], policy_result.band, policy_result.triggered_policies, policy_result.explanations)
+            row["band"] = policy_result.band
+            if policy_result.triggered_policies and policy_result.band != stored_band:
+                self._log_case_action(AuditAction.CASE_POLICY_TRIGGERED, row["id"], ",".join(policy_result.triggered_policies))
+            values = [
+                row["id"],
+                row.get("band") or "UNKNOWN",
+                row["status"],
+                row.get("priority") or "",
+                row.get("created_at") or "",
+                row.get("updated_at") or "",
+            ]
             for col, value in enumerate(values):
-                pill_state = self._status_state(row["status"]) if col == 1 else None
                 if col == 0:
                     table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
                     continue
+                if col == 1:
+                    table.setCellWidget(idx, col, create_band_pill(str(value)))
+                    continue
+                pill_state = self._status_state(values[2]) if col == 2 else None
                 if pill_state:
                     table.setCellWidget(idx, col, create_pill(str(value), pill_state))
                 else:
-                    accent = self._risk_color("High" if row["status"] == "ESCALATED" else "Medium") if col == 0 else None
+                    accent = band_color(str(values[1])) if col == 3 else None
                     table.setCellWidget(idx, col, rich_cell(str(value), accent_color=accent))
-        if rows:
+        if rows_list:
             table.selectRow(0)
             self._load_case_details()
         apply_table_density(table, self.table_density)
@@ -865,6 +911,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if item and item.text():
             return item.text()
         return None
+
+    def _on_case_clicked(self, row: int, _: int) -> None:
+        self.case_table.selectRow(row)
+        case_id = self._selected_case_id()
+        if case_id:
+            self._log_case_action(AuditAction.CASE_OPENED, case_id, "row_select")
+        self._load_case_details()
 
     def _toggle_case_detail_panel(self) -> None:
         if not hasattr(self, "case_splitter"):
@@ -909,15 +962,27 @@ class MainWindow(QtWidgets.QMainWindow):
         if row < 0:
             return
         case_id_item = self.case_table.item(row, 0)
-        status_widget = self.case_table.cellWidget(row, 1)
+        status_widget = self.case_table.cellWidget(row, 2)
         if not case_id_item:
             return
         case_id = case_id_item.text()
         self.app_state.set_selected_case(case_id)
-        status_item = self.case_table.item(row, 1)
-        status_text = status_widget.text() if status_widget else (status_item.text() if status_item else "")
+        status_item = self.case_table.item(row, 2)
+        status_text = status_widget.text() if hasattr(status_widget, "text") else (status_item.text() if status_item else "")
+        band_widget = self.case_table.cellWidget(row, 1)
+        band_text = band_widget.text() if hasattr(band_widget, "text") else "Unknown"
+        self.case_band_pill.setText(str(band_text).title())
+        self.case_band_pill.setStyleSheet(
+            "padding: 4px 10px;"
+            "border-radius: 12px;"
+            f"background: {band_color(band_text)};"
+            "color: #0b0c10;"
+            "font-weight: 700;"
+            "font-size: 11px;"
+        )
         update_pill(self.case_status_pill, status_text, self._status_state(status_text))
         self.case_title.setText(f"Case {case_id}")
+        self.case_status_combo.setCurrentText(status_text)
 
         events = self.db.case_timeline(case_id)
         self.case_timeline_table.setRowCount(len(events))
@@ -935,9 +1000,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(f"{alert['score']:.1f}"))
             self.case_alerts_table.setCellWidget(idx, 2, create_pill(level, self._risk_state(level)))
             self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(domain_value))
+        case_row = self.db.get_case(case_id)
+        triggers = []
+        if case_row:
+            triggers = (case_row["policy_triggers"] or "").split(",") if "policy_triggers" in case_row.keys() else []
+        tooltip = "\n".join([t for t in triggers if t]) or "No policy triggers"
+        self.case_policy_btn.setToolTip(tooltip)
 
     def _risk_color(self, level: str) -> str:
-        return {"High": "#ef4444", "Medium": "#f7a400", "Low": "#10b981"}.get(level, "#4b5563")
+        return severity_color(level)
 
     def _risk_state(self, level: str) -> str:
         mapping = {"High": "alert", "Medium": "warning", "Low": "success"}
@@ -1077,11 +1148,45 @@ class MainWindow(QtWidgets.QMainWindow):
         if not case_id:
             return
         self.db.update_case_status(case_id, status="CLOSED")
-        self.audit.log(self.username, AuditAction.CASE_STATUS_CHANGE.value, target=case_id, details="Closed from UI")
+        self._log_case_action(AuditAction.CASE_STATUS_CHANGE, case_id, "Closed")
         note_text = sanitize_text(self.case_notes.toPlainText(), max_length=500, allow_newlines=False)
         if note_text:
             self.db.attach_note(case_id, CaseNote(author=self.username, message=note_text, created_at=datetime.utcnow()))
             self.audit.log(self.username, AuditAction.CASE_NOTE_ADDED.value, target=case_id, details=note_text[:120])
+
+    def _update_case_status(self):
+        case_id = self._selected_case_id()
+        if not case_id:
+            return
+        new_status = self.case_status_combo.currentText()
+        self.db.update_case_status(case_id, status=new_status)
+        self._log_case_action(AuditAction.CASE_STATUS_CHANGE, case_id, f"Status={new_status}")
+        self._load_cases()
+
+    def _assign_case(self):
+        case_id = self._selected_case_id()
+        if not case_id:
+            return
+        assignee, ok = QtWidgets.QInputDialog.getText(self, "Assign Case", "Assign to user")
+        if not ok:
+            return
+        assignee = sanitize_text(assignee, max_length=128)
+        self.db.assign_case(case_id, assignee or None)
+        self._log_case_action(AuditAction.CASE_ASSIGNED, case_id, assignee or "cleared")
+        self._load_cases()
+
+    def _toggle_policy_flag(self):
+        case_id = self._selected_case_id()
+        if not case_id:
+            return
+        row = self.db.get_case(case_id)
+        flagged = False
+        if row and "policy_flag" in row.keys():
+            flagged = bool(row["policy_flag"])
+        new_state = not flagged
+        self.db.set_case_policy_flag(case_id, new_state)
+        self._log_case_action(AuditAction.CASE_POLICY_TRIGGERED, case_id, f"manual_flag={new_state}")
+        self._load_cases()
             self.case_notes.clear()
         self.refresh_all()
 
@@ -1089,6 +1194,7 @@ class MainWindow(QtWidgets.QMainWindow):
         case_id = self._selected_case_id()
         if not case_id:
             return
+        self._log_case_action(AuditAction.CASE_OPENED, case_id, "timeline_view")
         dialog = CaseTimelineDialog(self.db, case_id, self)
         dialog.exec()
 
@@ -1115,7 +1221,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Export complete",
                 f"Case exported to {path}\nJSON: {json_path}\nSHA256: {hash_value}",
             )
-            self.audit.log(self.username, AuditAction.SETTINGS_CHANGE.value, target=case_id, details="Forensic export")
+            self._log_case_action(AuditAction.CASE_EXPORTED, case_id, "forensic_export")
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
 
@@ -1383,6 +1489,9 @@ class AppBootstrap:
         accounts = {a.id: a for a in make_accounts(customers.values())}
         engine = RiskScoringEngine(indicators=indicators, thresholds=thresholds, customers=customers, accounts=accounts)
         return engine, thresholds
+
+    def build_policy_engine(self) -> PolicyEngine:
+        return PolicyEngine.from_file()
 
     def start_simulation(self, engine: RiskScoringEngine, thresholds: RiskThresholds) -> SimulationWorker:
         accounts_map: Dict[str, str] = {}
