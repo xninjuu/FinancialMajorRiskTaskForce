@@ -157,7 +157,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auth = auth
         self.username = username
         self.role = role
-        self.session_timeout = timedelta(minutes=session_timeout_minutes)
+        saved_timeout = int(self._load_pref("ui.session_timeout", str(session_timeout_minutes)))
+        self.session_timeout = timedelta(minutes=saved_timeout)
         self.last_activity = datetime.utcnow()
         self.tamper_warnings = tamper_warnings or []
         self.settings = settings
@@ -293,6 +294,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.table_density = mode
         self._save_pref("ui.table_density", mode)
         self._apply_table_density_all()
+
+    def _change_session_timeout(self, minutes: int) -> None:
+        self.session_timeout = timedelta(minutes=minutes)
+        self._save_pref("ui.session_timeout", str(minutes))
+
+    def _open_exports_dir(self) -> None:
+        if not self.settings or not self.settings.exports_dir:
+            QtWidgets.QMessageBox.warning(self, "Exports", "No exports directory configured.")
+            return
+        target = Path(self.settings.exports_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(target)))
 
     def _save_pref(self, key: str, value: str) -> None:
         try:
@@ -697,32 +710,59 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_settings(self) -> QtWidgets.QWidget:
         page = SectionCard()
-        layout = QtWidgets.QFormLayout(page)
+        layout = QtWidgets.QVBoxLayout(page)
+
+        identity_card = SectionCard()
+        identity_layout = QtWidgets.QFormLayout(identity_card)
         self.role_label = QtWidgets.QLabel(self.role)
-        layout.addRow("Current role", self.role_label)
+        identity_layout.addRow("Current role", self.role_label)
         if self.settings:
-            layout.addRow("Secure mode", QtWidgets.QLabel("ON" if self.settings.secure_mode else "OFF"))
-            layout.addRow("Expected hash", QtWidgets.QLabel(self.settings.expected_exe_hash or "not set"))
+            identity_layout.addRow("Secure mode", QtWidgets.QLabel("ON" if self.settings.secure_mode else "OFF"))
+            identity_layout.addRow("Expected hash", QtWidgets.QLabel(self.settings.expected_exe_hash or "not set"))
         if self.tamper_warnings:
             warnings_box = QtWidgets.QTextEdit("\n".join(self.tamper_warnings))
             warnings_box.setReadOnly(True)
             warnings_box.setMaximumHeight(120)
-            layout.addRow("Security warnings", warnings_box)
+            identity_layout.addRow("Security warnings", warnings_box)
+        layout.addWidget(identity_card)
+
+        controls_card = SectionCard()
+        controls_form = QtWidgets.QFormLayout(controls_card)
         self.theme_combo = QtWidgets.QComboBox()
         self.theme_combo.addItems(["dark", "light"])
         self.theme_combo.setCurrentText(self.theme)
-        layout.addRow("Theme", self.theme_combo)
+        controls_form.addRow("Theme", self.theme_combo)
         self.font_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.font_slider.setRange(80, 120)
         self.font_slider.setValue(self.font_scale)
-        layout.addRow("Font scale (%)", self.font_slider)
+        controls_form.addRow("Font scale (%)", self.font_slider)
         self.density_combo = QtWidgets.QComboBox()
         self.density_combo.addItems(DENSITY_STYLES.keys())
         self.density_combo.setCurrentText(self.table_density)
-        layout.addRow("Table density", self.density_combo)
+        controls_form.addRow("Table density", self.density_combo)
+
+        self.session_timeout_spin = QtWidgets.QSpinBox()
+        self.session_timeout_spin.setRange(5, 60)
+        self.session_timeout_spin.setValue(int(self.session_timeout.total_seconds() // 60))
+        controls_form.addRow("Session timeout (min)", self.session_timeout_spin)
+
+        button_row = QtWidgets.QHBoxLayout()
+        self.lock_button = QtWidgets.QPushButton("Lock session")
+        self.open_exports_button = QtWidgets.QPushButton("Open exports folder")
+        self.open_exports_button.setToolTip("Opens the configured exports directory for bundles and graphs")
+        button_row.addWidget(self.lock_button)
+        button_row.addWidget(self.open_exports_button)
+        button_row.addStretch(1)
+        controls_form.addRow("Security actions", button_row)
+
+        layout.addWidget(controls_card)
+
         self.theme_combo.currentTextChanged.connect(self._change_theme)
         self.font_slider.valueChanged.connect(self._change_font_scale)
         self.density_combo.currentTextChanged.connect(self._change_density)
+        self.session_timeout_spin.valueChanged.connect(self._change_session_timeout)
+        self.lock_button.clicked.connect(self._lock_session)
+        self.open_exports_button.clicked.connect(self._open_exports_dir)
         return page
 
     # endregion
