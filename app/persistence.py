@@ -18,6 +18,7 @@ class PersistenceLayer:
         self.db_path = Path(db_path)
         ensure_parent_dir(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn.isolation_level = "DEFERRED"
         self.conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         self._init_db()
@@ -622,6 +623,8 @@ class PersistenceLayer:
         reason_token: str | None = None,
     ) -> None:
         with self._lock:
+            if not self.conn.in_transaction:
+                self.conn.execute("BEGIN")
             cursor = self.conn.cursor()
             cursor.execute(
                 """
