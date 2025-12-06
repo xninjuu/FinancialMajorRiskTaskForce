@@ -112,8 +112,9 @@ class SimulationWorker(QtCore.QThread):
                 created_at=datetime.utcnow(),
             )
             if risk_level != "Low":
-                if risk_level == "High":
-                    case = Case(id=str(uuid.uuid4()), alerts=[alert], status=CaseStatus.OPEN, priority="High")
+                if risk_level in {"High", "Medium"}:
+                    priority = "High" if risk_level == "High" else "Medium"
+                    case = Case(id=str(uuid.uuid4()), alerts=[alert], status=CaseStatus.OPEN, priority=priority)
                     alert.case_id = case.id
                     self.db.record_case(case)
                 self.db.record_alert(alert, risk_level)
