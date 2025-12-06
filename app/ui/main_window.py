@@ -1182,7 +1182,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.db.set_case_policy_flag(case_id, new_state)
         self._log_case_action(AuditAction.CASE_POLICY_TRIGGERED, case_id, f"manual_flag={new_state}")
         self._load_cases()
-            self.case_notes.clear()
+        self.case_notes.clear()
         self.refresh_all()
 
     def _open_timeline(self):
