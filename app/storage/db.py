@@ -341,19 +341,22 @@ class Database:
         return cursor.fetchall()
 
     def case_timeline(self, case_id: str, limit: int | None = None):
-        events = []
-        alerts = self.alerts_for_case(case_id)
-        for alert in alerts:
+        events: list[dict] = []
+        for alert_row in self.alerts_for_case(case_id):
+            alert = dict(alert_row)
+            created = alert.get("created_at") or ""
+            risk_level = alert.get("risk_level") or "Unknown"
             events.append(
                 {
-                    "timestamp": alert["created_at"],
+                    "timestamp": created,
                     "type": "Alert",
-                    "description": f"Alert {alert['id']} ({alert['risk_level']})",
-                    "risk_level": alert["risk_level"],
-                    "metadata": dict(alert),
+                    "description": f"Alert {alert.get('id', '')} ({risk_level})",
+                    "risk_level": risk_level,
+                    "metadata": alert,
                 }
             )
-            tx = self.get_transaction(alert["transaction_id"])
+            tx_id = alert.get("transaction_id")
+            tx = self.get_transaction(tx_id) if tx_id else None
             if tx:
                 events.append(
                     {
@@ -364,29 +367,28 @@ class Database:
                     }
                 )
         for note in self.case_notes(case_id):
-                events.append(
-                    {
-                        "timestamp": note.created_at.isoformat(),
-                        "type": "Note",
-                        "risk_level": None,
-                        "description": f"{note.author}: {note.message}",
-                        "metadata": note,
-                    }
-                )
-        for audit_row in self.audit_for_target(case_id):
             events.append(
                 {
-                    "timestamp": audit_row["timestamp"],
-                    "type": "Audit",
+                    "timestamp": note.created_at.isoformat(),
+                    "type": "Note",
                     "risk_level": None,
-                    "description": f"{audit_row['action']} by {audit_row['username']}",
-                    "metadata": audit_row,
+                    "description": f"{note.author}: {note.message}",
+                    "metadata": note,
                 }
             )
-        events.sort(key=lambda e: e["timestamp"])
-        if limit:
-            return events[-limit:]
-        return events
+        for audit_row in self.audit_for_target(case_id):
+            audit = dict(audit_row)
+            events.append(
+                {
+                    "timestamp": audit.get("timestamp", ""),
+                    "type": "Audit",
+                    "risk_level": None,
+                    "description": f"{audit.get('action', '')} by {audit.get('username', '')}",
+                    "metadata": audit,
+                }
+            )
+        events.sort(key=lambda e: e.get("timestamp") or "")
+        return events[-limit:] if limit else events
 
     def attach_note(self, case_id: str, note: CaseNote) -> None:
         row = self.get_case(case_id)
