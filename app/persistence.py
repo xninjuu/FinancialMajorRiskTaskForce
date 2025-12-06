@@ -152,6 +152,9 @@ class PersistenceLayer:
             """
         )
         cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_correlations_alert_created ON correlations(alert_id, created_at)"
+        )
+        cursor.execute(
             """
             CREATE TABLE baselines (
                 customer_id TEXT PRIMARY KEY,
@@ -582,7 +585,8 @@ class PersistenceLayer:
         )
         self.conn.commit()
 
-    def list_correlations(self, alert_id: str) -> list[sqlite3.Row]:
+    def list_correlations(self, alert_id: str, *, limit: int = 200) -> list[sqlite3.Row]:
+        limit = max(1, min(limit, 500))
         cursor = self.conn.cursor()
         cursor.execute(
             """
@@ -590,8 +594,26 @@ class PersistenceLayer:
             FROM correlations
             WHERE alert_id = ?
             ORDER BY datetime(created_at) DESC
+            LIMIT ?
             """,
-            (alert_id,),
+            (alert_id, limit),
+        )
+        return cursor.fetchall()
+
+    def correlation_metrics(self, alert_ids: list[str], *, max_rows: int = 500) -> list[sqlite3.Row]:
+        if not alert_ids:
+            return []
+        placeholders = ",".join(["?"] * len(alert_ids))
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT alert_id, related_id, reason, created_at, confidence, reason_token
+            FROM correlations
+            WHERE alert_id IN ({placeholders})
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+            """,
+            [*alert_ids, max_rows],
         )
         return cursor.fetchall()
 

@@ -70,14 +70,14 @@ class NetworkView(QtWidgets.QGraphicsView):
         correlation_total = 0
         confidence_sum = 0.0
         reason_tokens: dict[str, int] = {}
-        for alert_row in self.db.list_alerts(limit=100):
-            rows = self.db.list_correlations(alert_row["id"])
-            correlation_total += len(rows)
-            for row in rows:
-                if "confidence" in row.keys() and row["confidence"]:
-                    confidence_sum += row["confidence"]
-                if "reason_token" in row.keys() and row["reason_token"]:
-                    reason_tokens[row["reason_token"]] = reason_tokens.get(row["reason_token"], 0) + 1
+        alerts = list(self.db.list_alerts(limit=80))
+        correlation_rows = self.db.correlation_metrics([row["id"] for row in alerts], max_rows=400)
+        correlation_total = len(correlation_rows)
+        for row in correlation_rows:
+            if "confidence" in row.keys() and row["confidence"]:
+                confidence_sum += row["confidence"]
+            if "reason_token" in row.keys() and row["reason_token"]:
+                reason_tokens[row["reason_token"]] = reason_tokens.get(row["reason_token"], 0) + 1
         avg_conf = (confidence_sum / correlation_total) if correlation_total else 0
         summary = scene.addText(
             f"Clusters: {cluster_count} | edges: {len(edge_weights)} | correlations: {correlation_total} | avg confidence {avg_conf:.2f}"

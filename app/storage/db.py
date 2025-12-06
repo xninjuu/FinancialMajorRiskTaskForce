@@ -314,8 +314,11 @@ class Database:
             reason_token=reason_token,
         )
 
-    def list_correlations(self, alert_id: str):
-        return self.persistence.list_correlations(alert_id)
+    def list_correlations(self, alert_id: str, *, limit: int = 200):
+        return self.persistence.list_correlations(alert_id, limit=limit)
+
+    def correlation_metrics(self, alert_ids: list[str], *, max_rows: int = 500):
+        return self.persistence.correlation_metrics(alert_ids, max_rows=max_rows)
 
     def upsert_baseline(self, customer_id: str, avg_amount: float, tx_count: int) -> None:
         self.persistence.upsert_baseline(customer_id, avg_amount, tx_count)

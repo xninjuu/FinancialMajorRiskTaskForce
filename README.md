@@ -232,11 +232,11 @@ Voraussetzungen: Aktivierte venv (`.venv\\Scripts\\activate`), Abhängigkeiten i
    ```
    Der Build legt `dist/FMR_TaskForce_GUI.exe` an.
 
-2) Start per Doppelklick oder per `start_gui.bat` (Root des Repos):
-   ```bat
-   start_gui.bat
+2) Start per Doppelklick auf `dist/FMR_TaskForce_GUI.exe` oder via PowerShell:
+   ```powershell
+   ./dist/FMR_TaskForce_GUI.exe
    ```
-   Das Batch-Skript hält das Fenster offen und meldet Fehler klar.
+   Das Fenster bleibt geöffnet, damit Fehlermeldungen sichtbar bleiben.
 
 3) Laufzeitpfade:
    - Configs (`indicators.json`, `thresholds.json`) werden aus `config/` neben der EXE oder aus dem eingebetteten Bundle gelesen. Optional kann `CODEX_CONFIG_DIR` gesetzt werden.
@@ -311,7 +311,7 @@ Beim Start erscheinen im Terminal:
    The build bundles `config/indicators.json` and `config/thresholds.json` and excludes web server components.
 3. Launch on Windows (double-click or via shell):
    ```powershell
-   .\start.bat
+   .\dist\FMR_TaskForce_GUI.exe
    ```
 4. First-run admin bootstrap:
    - Provide `CODEX_ADMIN_PASSWORD` in the environment to set the initial admin password securely.
