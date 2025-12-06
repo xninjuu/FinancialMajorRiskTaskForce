@@ -173,7 +173,7 @@ class LoginDialog(QtWidgets.QDialog):
         line_edit.addAction(action, QtWidgets.QLineEdit.LeadingPosition)
 
     def _add_trailing_widget(self, line_edit: QtWidgets.QLineEdit, widget: QtWidgets.QWidget) -> None:
-        w_action = QtGui.QWidgetAction(line_edit)
+        w_action = QtWidgets.QWidgetAction(line_edit)
         w_action.setDefaultWidget(widget)
         line_edit.addAction(w_action, QtWidgets.QLineEdit.TrailingPosition)
 
