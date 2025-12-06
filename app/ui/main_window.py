@@ -1028,7 +1028,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_policy_btn.setToolTip(tooltip)
 
     def _risk_color(self, level: str) -> str:
-(self, level: str) -> str:
         return severity_color(level)
 
     def _risk_state(self, level: str) -> str:
