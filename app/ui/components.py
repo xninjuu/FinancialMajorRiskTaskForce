@@ -229,10 +229,6 @@ class SectionCard(QtWidgets.QWidget):
         super().__init__(parent)
         self.setObjectName("sectionCard")
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
-
         shadow = QtWidgets.QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(18)
         shadow.setOffset(0, 4)
