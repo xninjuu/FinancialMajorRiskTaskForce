@@ -12,6 +12,7 @@ from app.security.audit import AuditLogger, AuditAction
 from app.security.tamper import verify_executable
 from app.storage.db import Database
 from app.ui.app_state import AppState
+from app.ui.components import apply_theme_to_app
 from app.ui.login_dialog import LoginDialog
 from app.ui.register_dialog import RegisterDialog
 from app.ui.main_window import AppBootstrap, MainWindow
@@ -36,6 +37,7 @@ def main() -> None:
     demo_hint = f"Demo: {demo_user} / {demo_password} (nur lokal)"
 
     app = QtWidgets.QApplication(sys.argv)
+    apply_theme_to_app(app, "dark")
     login = LoginDialog(demo_hint=demo_hint)
 
     while True:
