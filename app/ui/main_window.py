@@ -834,6 +834,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_cases(self, rows: Optional[list[dict]] = None):
         rows = self.db.list_cases() if rows is None else rows
+        if isinstance(rows, bool):
+            rows = []
         table = self.case_table
         table.setUpdatesEnabled(False)
         table.setRowCount(len(rows))
@@ -912,7 +914,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         case_id = case_id_item.text()
         self.app_state.set_selected_case(case_id)
-        status_text = status_widget.text() if status_widget else self.case_table.item(row, 1).text()
+        status_item = self.case_table.item(row, 1)
+        status_text = status_widget.text() if status_widget else (status_item.text() if status_item else "")
         update_pill(self.case_status_pill, status_text, self._status_state(status_text))
         self.case_title.setText(f"Case {case_id}")
 
@@ -926,11 +929,12 @@ class MainWindow(QtWidgets.QMainWindow):
         alerts = self.db.alerts_for_case(case_id)
         self.case_alerts_table.setRowCount(len(alerts))
         for idx, alert in enumerate(alerts):
-            level = alert.get("risk_level") or "Unknown"
+            level = alert["risk_level"] if "risk_level" in alert.keys() else "Unknown"
+            domain_value = alert["domain"] if "domain" in alert.keys() else ""
             self.case_alerts_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(alert["id"]))
             self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(f"{alert['score']:.1f}"))
             self.case_alerts_table.setCellWidget(idx, 2, create_pill(level, self._risk_state(level)))
-            self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(alert.get("domain") or ""))
+            self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(domain_value))
 
     def _risk_color(self, level: str) -> str:
         return {"High": "#ef4444", "Medium": "#f7a400", "Low": "#10b981"}.get(level, "#4b5563")
@@ -949,7 +953,7 @@ class MainWindow(QtWidgets.QMainWindow):
         table.setUpdatesEnabled(False)
         table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
-            values = [row["timestamp"], row["username"], row["action"], row.get("target") or ""]
+            values = [row["timestamp"], row["username"], row["action"], row["target"] or ""]
             for col, value in enumerate(values):
                 table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
         table.setUpdatesEnabled(True)
@@ -1269,7 +1273,7 @@ class MainWindow(QtWidgets.QMainWindow):
             due_at=self.task_due.date().toPython(),
         )
         self.db.upsert_task(task)
-        self.audit.log(self.username, AuditAction.CASE_NOTE.value, target=task.related_case_id or "task", details=task.title)
+        self.audit.log(self.username, AuditAction.CASE_NOTE_ADDED.value, target=task.related_case_id or "task", details=task.title)
         self._load_tasks()
         QtWidgets.QMessageBox.information(self, "Task", "Task created")
 

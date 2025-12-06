@@ -349,8 +349,8 @@ class Database:
                     "timestamp": alert["created_at"],
                     "type": "Alert",
                     "description": f"Alert {alert['id']} ({alert['risk_level']})",
-                    "risk_level": alert.get("risk_level"),
-                    "metadata": alert,
+                    "risk_level": alert["risk_level"],
+                    "metadata": dict(alert),
                 }
             )
             tx = self.get_transaction(alert["transaction_id"])
