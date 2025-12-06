@@ -61,8 +61,7 @@ def _get_tokens(theme: ThemeName | None = None) -> ThemeTokens:
 
 
 def _build_base_style(tokens: ThemeTokens) -> str:
-    return (
-        f"
+    return f"""
     QWidget {{
         background-color: {tokens.bg};
         color: {tokens.text};
@@ -120,8 +119,7 @@ def _build_base_style(tokens: ThemeTokens) -> str:
         height: 0;
         width: 0;
     }}
-    "
-    )
+    """
 
 
 def apply_theme(widget: QtWidgets.QWidget, theme: ThemeName = "dark") -> None:
