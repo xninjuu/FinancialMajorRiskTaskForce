@@ -170,6 +170,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.theme = self._load_pref("ui.theme", "dark")
         self.table_density = self._load_pref("ui.table_density", "Comfortable")
         self.font_scale = int(self._load_pref("ui.font_scale", "100"))
+        self.customers_cache = make_customers()
+        self.accounts_cache = make_accounts(self.customers_cache)
+        self.account_to_customer = {a.id: a.customer_id for a in self.accounts_cache}
+        self._refresh_pending = False
 
         self.setWindowTitle("FMR TaskForce Codex - Desktop")
         self.resize(1200, 800)
@@ -237,10 +241,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._activity_timer.start(30_000)
 
         self._refresh_timer = QtCore.QTimer(self)
-        self._refresh_timer.timeout.connect(self.refresh_all)
-        self._refresh_timer.start(5_000)
+        self._refresh_timer.timeout.connect(self._schedule_refresh)
+        self._refresh_timer.start(7_500)
 
         self.installEventFilter(self)
+        self.refresh_all()
 
     def _build_status_bar(self) -> None:
         bar = QtWidgets.QStatusBar()
@@ -768,31 +773,42 @@ class MainWindow(QtWidgets.QMainWindow):
     # endregion
 
     def attach_simulation(self, worker: SimulationWorker):
-        worker.alert_ready.connect(lambda _: self.refresh_all())
+        worker.alert_ready.connect(lambda _: self._schedule_refresh())
         worker.start()
 
-    def refresh_all(self):
-        self._load_dashboard()
-        self._load_alerts()
-        self._load_cases()
+    def _schedule_refresh(self) -> None:
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
+        QtCore.QTimer.singleShot(750, self.refresh_all)
+
+    def refresh_all(self, alerts: Optional[list[dict]] = None, cases: Optional[list[dict]] = None):
+        self._refresh_pending = False
+        alerts = self.db.list_alerts(limit=200) if alerts is None else alerts
+        cases = self.db.list_cases() if cases is None else cases
+        self._load_dashboard(alerts, cases)
+        self._load_alerts(alerts)
+        self._load_cases(cases)
         self._load_customers()
         self._load_audit()
-        self._load_clusters()
-        self._load_actor()
+        self._load_clusters(alerts)
+        self._load_actor(alerts, cases)
         self._load_evidence_table()
         self.network_view.refresh()
 
-    def _load_dashboard(self):
-        alerts = self.db.list_alerts(limit=200)
-        cases = self.db.list_cases()
+    def _load_dashboard(self, alerts: Optional[list[dict]] = None, cases: Optional[list[dict]] = None):
+        alerts = self.db.list_alerts(limit=200) if alerts is None else alerts
+        cases = self.db.list_cases() if cases is None else cases
         high_24h = [a for a in alerts if a["risk_level"] == "High" and datetime.fromisoformat(a["created_at"]) >= datetime.utcnow() - timedelta(hours=24)]
         self.kpi_alerts.setText(f"Alerts: {len(alerts)}")
         self.kpi_cases.setText(f"Open Cases: {len([c for c in cases if c['status'] != 'CLOSED'])}")
         self.kpi_high.setText(f"High Alerts (24h): {len(high_24h)}")
 
-    def _load_alerts(self):
-        rows = self.db.list_alerts(limit=200)
-        self.alert_table.setRowCount(len(rows))
+    def _load_alerts(self, rows: Optional[list[dict]] = None):
+        rows = self.db.list_alerts(limit=200) if rows is None else rows
+        table = self.alert_table
+        table.setUpdatesEnabled(False)
+        table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
             risk_color = self._risk_color(row["risk_level"])
             cells = [
@@ -805,32 +821,36 @@ class MainWindow(QtWidgets.QMainWindow):
             ]
             for col, value in enumerate(cells):
                 if isinstance(value, QtWidgets.QWidget):
-                    self.alert_table.setCellWidget(idx, col, value)
+                    table.setCellWidget(idx, col, value)
                 else:
-                    self.alert_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
-        apply_table_density(self.alert_table, self.table_density)
+                    table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        apply_table_density(table, self.table_density)
+        table.setUpdatesEnabled(True)
 
     def _toggle_triage_mode(self, checked: bool) -> None:
         mode = "Compact" if checked else self.table_density
         self.alert_table.setAlternatingRowColors(checked)
         apply_table_density(self.alert_table, mode)
 
-    def _load_cases(self):
-        rows = self.db.list_cases()
-        self.case_table.setRowCount(len(rows))
+    def _load_cases(self, rows: Optional[list[dict]] = None):
+        rows = self.db.list_cases() if rows is None else rows
+        table = self.case_table
+        table.setUpdatesEnabled(False)
+        table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
             values = [row["id"], row["status"], row["priority"], row["created_at"], row["updated_at"]]
             for col, value in enumerate(values):
                 pill_state = self._status_state(row["status"]) if col == 1 else None
                 if pill_state:
-                    self.case_table.setCellWidget(idx, col, create_pill(str(value), pill_state))
+                    table.setCellWidget(idx, col, create_pill(str(value), pill_state))
                 else:
                     accent = self._risk_color("High" if row["status"] == "ESCALATED" else "Medium") if col == 0 else None
-                    self.case_table.setCellWidget(idx, col, rich_cell(str(value), accent_color=accent))
+                    table.setCellWidget(idx, col, rich_cell(str(value), accent_color=accent))
         if rows:
-            self.case_table.selectRow(0)
+            table.selectRow(0)
             self._load_case_details()
-        apply_table_density(self.case_table, self.table_density)
+        apply_table_density(table, self.table_density)
+        table.setUpdatesEnabled(True)
 
     def _toggle_case_detail_panel(self) -> None:
         if not hasattr(self, "case_splitter"):
@@ -860,12 +880,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_splitter.widget(1).setVisible(visible)
 
     def _load_customers(self):
-        customers = make_customers()
-        self.customer_table.setRowCount(len(customers))
+        customers = self.customers_cache
+        table = self.customer_table
+        table.setUpdatesEnabled(False)
+        table.setRowCount(len(customers))
         for idx, c in enumerate(customers):
             values = [c.name, c.country, "Yes" if c.is_pep else "No", f"{c.annual_declared_income:,.0f}"]
             for col, value in enumerate(values):
-                self.customer_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        table.setUpdatesEnabled(True)
 
     def _load_case_details(self) -> None:
         row = self.case_table.currentRow()
@@ -910,32 +933,37 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_audit(self):
         rows = self.audit.recent(limit=200)
-        self.audit_table.setRowCount(len(rows))
+        table = self.audit_table
+        table.setUpdatesEnabled(False)
+        table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
             values = [row["timestamp"], row["username"], row["action"], row.get("target") or ""]
             for col, value in enumerate(values):
-                self.audit_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        table.setUpdatesEnabled(True)
 
-    def _load_clusters(self):
-        rows = self.db.list_alerts(limit=200)
+    def _load_clusters(self, rows: Optional[list[dict]] = None):
+        rows = self.db.list_alerts(limit=200) if rows is None else rows
         clusters: Dict[tuple[str, str], list[str]] = {}
         latest: Dict[tuple[str, str], str] = {}
         for row in rows:
             key = (row["domain"], row["risk_level"])
             clusters.setdefault(key, []).append(row["id"])
             latest[key] = row["created_at"]
+        self.cluster_table.setUpdatesEnabled(False)
         self.cluster_table.setRowCount(len(clusters))
         for idx, ((domain, risk), alert_ids) in enumerate(clusters.items()):
             values = [domain, risk, len(alert_ids), latest.get((domain, risk), "")]
             for col, value in enumerate(values):
                 self.cluster_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        self.cluster_table.setUpdatesEnabled(True)
 
-    def _load_actor(self):
-        customers = make_customers()
-        accounts = make_accounts(customers)
-        account_to_customer = {a.id: a.customer_id for a in accounts}
-        alerts = self.db.list_alerts(limit=300)
-        cases = self.db.list_cases()
+    def _load_actor(self, alerts: Optional[list[dict]] = None, cases: Optional[list[dict]] = None):
+        customers = self.customers_cache
+        accounts = self.accounts_cache
+        account_to_customer = self.account_to_customer
+        alerts = self.db.list_alerts(limit=300) if alerts is None else alerts
+        cases = self.db.list_cases() if cases is None else cases
         counts: Dict[str, Dict[str, int]] = {}
         for alert in alerts:
             tx = self.db.get_transaction(alert["transaction_id"])
@@ -945,6 +973,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for case in cases:
             bucket = counts.setdefault(case["id"], {"alerts": 0, "cases": 0})
             bucket["cases"] += 1
+        self.actor_table.setUpdatesEnabled(False)
         self.actor_table.setRowCount(len(customers))
         for idx, cust in enumerate(customers):
             baseline = self.baselines.fetch(cust.id)
@@ -952,6 +981,7 @@ class MainWindow(QtWidgets.QMainWindow):
             values = [cust.name, stats["alerts"], stats["cases"], f"{(baseline.avg_amount if baseline else 0):.0f}"]
             for col, value in enumerate(values):
                 self.actor_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+        self.actor_table.setUpdatesEnabled(True)
 
     def _load_evidence_table(self):
         case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
@@ -976,6 +1006,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if importance_filter != "any" and row.get("importance") != importance_filter:
                 continue
             filtered.append(row)
+        self.evidence_table.setUpdatesEnabled(False)
         self.evidence_table.setRowCount(len(filtered))
         for idx, row in enumerate(filtered):
             values = [
@@ -1005,6 +1036,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.evidence_table.setItem(idx, preview_col, QtWidgets.QTableWidgetItem("-"))
             ocr_value = "yes" if (row.get("ocr_text")) else "no"
             self.evidence_table.setItem(idx, ocr_col, QtWidgets.QTableWidgetItem(ocr_value))
+        self.evidence_table.setUpdatesEnabled(True)
 
     def _load_timeline_tab(self):
         case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
@@ -1012,12 +1044,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         limit = max(5, int(self.timeline_zoom.value()))
         events = self.db.case_timeline(case_id, limit=limit)
+        self.timeline_table.setUpdatesEnabled(False)
         self.timeline_table.setRowCount(len(events))
         for idx, event in enumerate(events):
             accent = self._risk_color(event.get("risk_level") or "")
             self.timeline_table.setCellWidget(idx, 0, rich_cell(str(event.get("timestamp")), accent_color=accent))
             self.timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event.get("type"))))
             self.timeline_table.setCellWidget(idx, 2, rich_cell(str(event.get("description")), accent_color=None))
+        self.timeline_table.setUpdatesEnabled(True)
 
     def _close_selected_case(self):
         if not validate_role(self.role) or self.role not in {"LEAD", "ADMIN"}:
@@ -1092,7 +1126,7 @@ class MainWindow(QtWidgets.QMainWindow):
         row = self.customer_table.currentRow()
         if row < 0:
             return
-        customers = make_customers()
+        customers = self.customers_cache
         if row >= len(customers):
             return
         profile = evaluate_customer(customers[row])
@@ -1186,6 +1220,7 @@ class MainWindow(QtWidgets.QMainWindow):
         status_text = self.task_filter_status.currentText()
         status = TaskStatus[status_text] if status_text in TaskStatus.__members__ else None
         tasks = self.db.list_tasks(assignee=assignee, status=status, limit=200)
+        self.task_table.setUpdatesEnabled(False)
         self.task_table.setRowCount(len(tasks))
         for idx, task in enumerate(tasks):
             due = task.due_at.strftime("%Y-%m-%d") if task.due_at else "-"
@@ -1205,6 +1240,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if col == 0:
                     item.setData(QtCore.Qt.UserRole, task.id)
                 self.task_table.setItem(idx, col, item)
+        self.task_table.setUpdatesEnabled(True)
 
     def _create_task(self) -> None:
         title = sanitize_text(self.task_title_input.text(), max_length=160)
