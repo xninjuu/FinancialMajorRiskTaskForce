@@ -1,0 +1,30 @@
+[
+  {
+    "id": "AML_HIGH_SCORE",
+    "domain": "AML",
+    "severity": "RED",
+    "description": "AML high score and multiple alerts",
+    "conditions": {"min_score": 70, "min_alerts": 2}
+  },
+  {
+    "id": "TF_ROUTE",
+    "domain": "TF",
+    "severity": "YELLOW",
+    "description": "Terror financing corridor risk",
+    "conditions": {"domains": ["TF"], "min_alerts": 1}
+  },
+  {
+    "id": "FRAUD_VELOCITY",
+    "domain": "FRAUD",
+    "severity": "YELLOW",
+    "description": "Card not present or velocity anomaly",
+    "conditions": {"domains": ["Fraud"], "min_high_alerts": 1}
+  },
+  {
+    "id": "TAX_COMPLEX",
+    "domain": "TAX",
+    "severity": "GREEN",
+    "description": "Tax risk noted but low band",
+    "conditions": {"domains": ["Tax"]}
+  }
+]
