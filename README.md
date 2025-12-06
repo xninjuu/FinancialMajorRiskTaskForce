@@ -7,14 +7,14 @@
 
   <!-- Animated Title -->
   <img 
-    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=28&pause=1000&color=FF0033&center=true&vCenter=true&width=750&lines=Financial+Major+Risk+Task+Force;Offline+AML+%2F+Fraud+Intelligence+Environment;FMRTF+CODEx" 
-    alt="FMRTF CODEx Title Animation"
+    src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=28&pause=1000&color=FF0033&center=true&vCenter=true&width=750&lines=Financial+Major+Risk+Task+Force;Offline+AML+%2F+Fraud+Intelligence+Environment;FMRTF" 
+    alt="FMRTF Title Animation"
 />
 
 <br/><br/>
 
   <!-- Badges -->
-  <img src="https://img.shields.io/badge/Project-FMRTF%20CODEx-000000?style=for-the-badge&labelColor=000000&color=FF0033" />
+  <img src="https://img.shields.io/badge/Project-FMRTF-000000?style=for-the-badge&labelColor=000000&color=FF0033" />
   <img src="https://img.shields.io/badge/Domain-AML%20%7C%20Fraud%20%7C%20KYC-000000?style=for-the-badge&labelColor=000000&color=8B0000" />
   <img src="https://img.shields.io/badge/Mode-OFFLINE-000000?style=for-the-badge&labelColor=000000&color=FF0033" />
   <img src="https://img.shields.io/badge/Stack-Python%20%7C%20SQLite%20%7C%20PySide6-000000?style=for-the-badge&labelColor=000000&color=8B0000" />
@@ -25,7 +25,7 @@
 
 ## 🧩 Overview
 
-**Financial Major Risk Task Force – CODEx** is an **offline intelligence environment** for  
+**Financial Major Risk Task Force** is an **offline intelligence environment** for  
 **Anti-Money Laundering (AML), Fraud, KYC and CFT analysis**.
 
 The system is designed to:
