@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 
 from app.core.validation import coerce_limit
@@ -24,9 +25,13 @@ class AuditAction(str, Enum):
 class AuditLogger:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._executor = ThreadPoolExecutor(max_workers=2)
 
     def log(self, username: str, action: str, target: str | None = None, details: str | None = None) -> None:
         self.db.record_audit(username=username, action=action, target=target, details=details)
+
+    def log_async(self, username: str, action: str, target: str | None = None, details: str | None = None) -> None:
+        self._executor.submit(self.log, username, action, target, details)
 
     def log_case_action(
         self,
@@ -40,7 +45,7 @@ class AuditLogger:
         detail_str = details or ""
         if role:
             detail_str = f"role={role}; {detail_str}" if detail_str else f"role={role}"
-        self.log(username=username, action=action, target=case_id, details=detail_str)
+        self.log_async(username=username, action=action, target=case_id, details=detail_str)
 
     def recent(self, limit: int = 200):
         safe_limit = coerce_limit(limit)

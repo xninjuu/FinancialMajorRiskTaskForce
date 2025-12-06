@@ -26,6 +26,7 @@ from app.core.policy_engine import PolicyEngine
 from app.security.audit import AuditLogger, AuditAction
 from app.security.auth import AuthService
 from app.storage.db import Database
+from app.storage.repositories import AlertRepository, CaseRepository, EvidenceRepository
 from app.ui.app_state import AppState
 from app.test_data import cnp_velocity, make_accounts, make_customers, pep_offshore_transactions, structuring_burst
 from app.ui.case_timeline import CaseTimelineDialog
@@ -46,6 +47,8 @@ from app.ui.components import (
 )
 from app.ui.login_dialog import LoginDialog
 from app.runtime_paths import resolve_runtime_file
+from app.ui.background import run_in_background
+from app.ui.table_models import ColumnDef, RowTableModel
 
 
 class SimulationWorker(QtCore.QThread):
@@ -180,6 +183,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self.accounts_cache = make_accounts(self.customers_cache)
         self.account_to_customer = {a.id: a.customer_id for a in self.accounts_cache}
         self._refresh_pending = False
+        self.case_repo = CaseRepository(db, policy_engine)
+        self.alert_repo = AlertRepository(db)
+        self.evidence_repo = EvidenceRepository(db)
+        self.case_model = RowTableModel(
+            [
+                ColumnDef("id", "Case ID"),
+                ColumnDef("band", "Band", band_key="band"),
+                ColumnDef("status", "Status"),
+                ColumnDef("priority", "Priority"),
+                ColumnDef("created_at", "Created"),
+                ColumnDef("updated_at", "Updated"),
+            ]
+        )
+        self.alert_model = RowTableModel(
+            [
+                ColumnDef("created_at", "Created"),
+                ColumnDef("transaction_id", "Account"),
+                ColumnDef("score", "Score", formatter=lambda v: f"{v:.1f}" if v is not None else ""),
+                ColumnDef("risk_level", "Level", severity_key="risk_level"),
+                ColumnDef("domain", "Domain"),
+                ColumnDef("case_id", "Case"),
+            ]
+        )
+        self.evidence_model = RowTableModel(
+            [
+                ColumnDef("id", "ID"),
+                ColumnDef("case_id", "Case"),
+                ColumnDef("kind", "Type"),
+                ColumnDef("hash_value", "Hash"),
+                ColumnDef("added_at", "Added"),
+            ]
+        )
 
         self.setWindowTitle("FMRTF – Financial Major Risk Task Force")
         self.resize(1200, 800)
@@ -400,10 +435,13 @@ class MainWindow(QtWidgets.QMainWindow):
         controls.addStretch(1)
         layout.addLayout(controls)
 
-        self.alert_table = QtWidgets.QTableWidget(0, 6)
-        self.alert_table.setHorizontalHeaderLabels(["Created", "Account", "Score", "Level", "Domain", "Case"])
+        self.alert_table = QtWidgets.QTableView()
+        self.alert_table.setModel(self.alert_model)
         self.alert_table.horizontalHeader().setStretchLastSection(True)
         self.alert_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.alert_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.alert_table.setAlternatingRowColors(True)
+        self.alert_table.setSortingEnabled(True)
         layout.addWidget(self.alert_table)
 
         self.alert_refresh_btn.clicked.connect(self._load_alerts)
@@ -450,10 +488,13 @@ class MainWindow(QtWidgets.QMainWindow):
         left_panel = SectionCard()
         left_layout = QtWidgets.QVBoxLayout(left_panel)
         left_layout.addWidget(create_section_header("Cases", accent="#d72638"))
-        self.case_table = QtWidgets.QTableWidget(0, 6)
-        self.case_table.setHorizontalHeaderLabels(["Case ID", "Band", "Status", "Priority", "Created", "Updated"])
+        self.case_table = QtWidgets.QTableView()
+        self.case_table.setModel(self.case_model)
         self.case_table.horizontalHeader().setStretchLastSection(True)
         self.case_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.case_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.case_table.setAlternatingRowColors(True)
+        self.case_table.setSortingEnabled(True)
         left_layout.addWidget(self.case_table)
 
         left_layout.addWidget(create_section_header("Case Timeline", accent="#f7a400"))
@@ -503,8 +544,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_policy_btn.clicked.connect(self._toggle_policy_flag)
         self.case_panel_toggle.clicked.connect(self._toggle_case_detail_panel)
         self.case_notes.installEventFilter(self)
-        self.case_table.itemSelectionChanged.connect(self._load_case_details)
-        self.case_table.cellClicked.connect(self._on_case_clicked)
+        self.case_table.selectionModel().selectionChanged.connect(self._on_case_selection)
         splitter.splitterMoved.connect(self._persist_case_split)
         self._restore_case_split()
 
@@ -644,22 +684,12 @@ class MainWindow(QtWidgets.QMainWindow):
         controls.addWidget(self.evidence_seal_btn)
         controls.addWidget(self.evidence_verify_btn)
         layout.addLayout(controls)
-        self.evidence_table = QtWidgets.QTableWidget(0, 10)
-        self.evidence_table.setHorizontalHeaderLabels(
-            [
-                "File",
-                "Hash",
-                "Added By",
-                "Sealed",
-                "Created",
-                "Type",
-                "Tags",
-                "Importance",
-                "Preview",
-                "OCR",
-            ]
-        )
+        self.evidence_table = QtWidgets.QTableView()
+        self.evidence_table.setModel(self.evidence_model)
         self.evidence_table.horizontalHeader().setStretchLastSection(True)
+        self.evidence_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.evidence_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.evidence_table.setSortingEnabled(True)
         self.seal_metadata_label = QtWidgets.QLabel("Seal metadata: n/a")
         layout.addWidget(self.evidence_table)
         layout.addWidget(self.seal_metadata_label)
@@ -814,48 +844,64 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_all(self, alerts: Optional[list[dict]] = None, cases: Optional[list[dict]] = None):
         self._refresh_pending = False
-        alerts = self.db.list_alerts(limit=200) if alerts is None else alerts
-        cases = self.db.list_cases() if cases is None else cases
+
+        def load_bundle():
+            return {
+                "alerts": alerts or self.alert_repo.list_alerts(limit=800),
+                "cases": cases or self.case_repo.list_cases(),
+                "evidence": self.evidence_repo.list_evidence(limit=300),
+                "audit": self.audit.recent(limit=200),
+            }
+
+        run_in_background(load_bundle, self._apply_refresh_bundle)
+
+    def _apply_refresh_bundle(self, data: dict | None, error: Exception | None) -> None:
+        if error or not data:
+            return
+        alerts = data["alerts"]
+        cases = data["cases"]
+        evidence = data["evidence"]
+        audit_rows = data["audit"]
         self._load_dashboard(alerts, cases)
         self._load_alerts(alerts)
         self._load_cases(cases)
         self._load_customers()
-        self._load_audit()
-        self._load_clusters(alerts)
-        self._load_actor(alerts, cases)
-        self._load_evidence_table()
-        self.network_view.refresh()
+        self._load_audit_rows(audit_rows)
+        self._load_evidence_table(evidence)
 
-    def _load_dashboard(self, alerts: Optional[list[dict]] = None, cases: Optional[list[dict]] = None):
-        alerts = self.db.list_alerts(limit=200) if alerts is None else alerts
-        cases = self.db.list_cases() if cases is None else cases
-        high_24h = [a for a in alerts if a["risk_level"] == "High" and datetime.fromisoformat(a["created_at"]) >= datetime.utcnow() - timedelta(hours=24)]
+    def _load_dashboard(self, alerts: Optional[list] = None, cases: Optional[list] = None):
+        alerts = alerts if alerts is not None else []
+        cases = cases if cases is not None else []
+        high_24h = []
+        for a in alerts:
+            level = getattr(a, "risk_level", None) or (a.get("risk_level") if isinstance(a, dict) else None)
+            created = getattr(a, "created_at", None) or (a.get("created_at") if isinstance(a, dict) else None)
+            if level == "High" and created:
+                try:
+                    if datetime.fromisoformat(str(created)) >= datetime.utcnow() - timedelta(hours=24):
+                        high_24h.append(a)
+                except Exception:
+                    continue
+        open_cases = [
+            c
+            for c in cases
+            if (getattr(c, "status", None) or (c.get("status") if isinstance(c, dict) else ""))
+            not in {"CLOSED", "Closed"}
+        ]
         self.kpi_alerts.setText(f"Alerts: {len(alerts)}")
-        self.kpi_cases.setText(f"Open Cases: {len([c for c in cases if c['status'] != 'CLOSED'])}")
+        self.kpi_cases.setText(f"Open Cases: {len(open_cases)}")
         self.kpi_high.setText(f"High Alerts (24h): {len(high_24h)}")
 
     def _load_alerts(self, rows: Optional[list[dict]] = None):
-        rows = self.db.list_alerts(limit=200) if rows is None else rows
-        table = self.alert_table
-        table.setUpdatesEnabled(False)
-        table.setRowCount(len(rows))
-        for idx, row in enumerate(rows):
-            risk_color = self._risk_color(row["risk_level"])
-            cells = [
-                rich_cell(row["created_at"], accent_color=risk_color),
-                rich_cell(row["transaction_id"], accent_color=None),
-                rich_cell(f"{row['score']:.1f}", accent_color=risk_color),
-                create_pill(row["risk_level"], self._risk_state(row["risk_level"])),
-                rich_cell(row["domain"], accent_color=None, tags=[row["domain"]]),
-                rich_cell(row["case_id"] or "", accent_color=None),
-            ]
-            for col, value in enumerate(cells):
-                if isinstance(value, QtWidgets.QWidget):
-                    table.setCellWidget(idx, col, value)
-                else:
-                    table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
-        apply_table_density(table, self.table_density)
-        table.setUpdatesEnabled(True)
+        normalized = []
+        if rows:
+            for row in rows:
+                if hasattr(row, "__dict__"):
+                    normalized.append(vars(row))
+                elif isinstance(row, dict):
+                    normalized.append(row)
+        self.alert_model.set_rows(normalized)
+        apply_table_density(self.alert_table, self.table_density)
 
     def _toggle_triage_mode(self, checked: bool) -> None:
         mode = "Compact" if checked else self.table_density
@@ -863,61 +909,29 @@ class MainWindow(QtWidgets.QMainWindow):
         apply_table_density(self.alert_table, mode)
 
     def _load_cases(self, rows: Optional[list[dict]] = None):
-        raw_rows = self.db.list_cases() if rows is None else rows
-        rows_list = [dict(r) for r in raw_rows] if raw_rows else []
-        table = self.case_table
-        table.setUpdatesEnabled(False)
-        table.setRowCount(len(rows_list))
-        for idx, row in enumerate(rows_list):
-            alerts = self.db.alerts_for_case(row["id"])
-            stored_band = row.get("band") if isinstance(row, dict) else None
-            policy_result = self.policy_engine.evaluate_case(row, alerts)
-            self.db.set_case_policy(row["id"], policy_result.band, policy_result.triggered_policies, policy_result.explanations)
-            row["band"] = policy_result.band
-            if policy_result.triggered_policies and policy_result.band != stored_band:
-                self._log_case_action(AuditAction.CASE_POLICY_TRIGGERED, row["id"], ",".join(policy_result.triggered_policies))
-            values = [
-                row["id"],
-                row.get("band") or "UNKNOWN",
-                row["status"],
-                row.get("priority") or "",
-                row.get("created_at") or "",
-                row.get("updated_at") or "",
-            ]
-            for col, value in enumerate(values):
-                if col == 0:
-                    table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
-                    continue
-                if col == 1:
-                    table.setCellWidget(idx, col, create_band_pill(str(value)))
-                    continue
-                pill_state = self._status_state(values[2]) if col == 2 else None
-                if pill_state:
-                    table.setCellWidget(idx, col, create_pill(str(value), pill_state))
-                else:
-                    accent = band_color(str(values[1])) if col == 3 else None
-                    table.setCellWidget(idx, col, rich_cell(str(value), accent_color=accent))
-        if rows_list:
-            table.selectRow(0)
-            self._load_case_details()
-        apply_table_density(table, self.table_density)
-        table.setUpdatesEnabled(True)
+        normalized = []
+        if rows:
+            for row in rows:
+                normalized.append(vars(row) if hasattr(row, "__dict__") else dict(row))
+        self.case_model.set_rows(normalized)
+        apply_table_density(self.case_table, self.table_density)
+        if normalized and not self.case_table.selectionModel().hasSelection():
+            self.case_table.selectRow(0)
+            self._load_case_details(normalized[0]["id"])
 
     def _selected_case_id(self) -> str | None:
-        row = self.case_table.currentRow()
-        if row < 0:
-            return None
-        item = self.case_table.item(row, 0)
-        if item and item.text():
-            return item.text()
+        index = self.case_table.currentIndex()
+        row = self.case_model.row_dict(index)
+        if row:
+            return str(row.get("id"))
         return None
 
-    def _on_case_clicked(self, row: int, _: int) -> None:
-        self.case_table.selectRow(row)
+    def _on_case_selection(self, *_args) -> None:
         case_id = self._selected_case_id()
         if case_id:
+            self.app_state.selected_case = case_id
             self._log_case_action(AuditAction.CASE_OPENED, case_id, "row_select")
-        self._load_case_details()
+            self._load_case_details(case_id)
 
     def _toggle_case_detail_panel(self) -> None:
         if not hasattr(self, "case_splitter"):
@@ -957,57 +971,64 @@ class MainWindow(QtWidgets.QMainWindow):
                 table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
         table.setUpdatesEnabled(True)
 
-    def _load_case_details(self) -> None:
-        row = self.case_table.currentRow()
-        if row < 0:
+    def _load_case_details(self, case_id: str | None = None) -> None:
+        target_case = case_id or self._selected_case_id()
+        if not target_case:
             return
-        case_id_item = self.case_table.item(row, 0)
-        status_widget = self.case_table.cellWidget(row, 2)
-        if not case_id_item:
+
+        def load():
+            case_row = self.case_repo.get_case_row(target_case) or {"id": target_case}
+            alerts = self.case_repo.alerts_for_case(target_case)
+            timeline = self.case_repo.case_timeline(target_case, limit=200)
+            return {"case": case_row, "alerts": alerts, "timeline": timeline}
+
+        run_in_background(load, lambda data, err: self._apply_case_details(target_case, data, err))
+
+    def _apply_case_details(self, case_id: str, data: dict | None, error: Exception | None) -> None:
+        if error or not data:
             return
-        case_id = case_id_item.text()
-        self.app_state.set_selected_case(case_id)
-        status_item = self.case_table.item(row, 2)
-        status_text = status_widget.text() if hasattr(status_widget, "text") else (status_item.text() if status_item else "")
-        band_widget = self.case_table.cellWidget(row, 1)
-        band_text = band_widget.text() if hasattr(band_widget, "text") else "Unknown"
-        self.case_band_pill.setText(str(band_text).title())
+        case_row = dict(data.get("case", {}))
+        alerts = data.get("alerts", [])
+        events = data.get("timeline", [])
+        band_value = case_row.get("band") or "UNKNOWN"
+        status_value = case_row.get("status") or "OPEN"
+        update_pill(self.case_status_pill, status_value, self._status_state(status_value))
+        self.case_band_pill.setText(str(band_value).title())
         self.case_band_pill.setStyleSheet(
             "padding: 4px 10px;"
             "border-radius: 12px;"
-            f"background: {band_color(band_text)};"
+            f"background: {band_color(band_value)};"
             "color: #0b0c10;"
             "font-weight: 700;"
             "font-size: 11px;"
         )
-        update_pill(self.case_status_pill, status_text, self._status_state(status_text))
         self.case_title.setText(f"Case {case_id}")
-        self.case_status_combo.setCurrentText(status_text)
+        self.case_status_combo.setCurrentText(status_value)
 
-        events = self.db.case_timeline(case_id)
         self.case_timeline_table.setRowCount(len(events))
         for idx, event in enumerate(events):
-            self.case_timeline_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(str(event.get("timestamp"))))
-            self.case_timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event.get("type"))))
-            self.case_timeline_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(str(event.get("description"))))
+            event_map = dict(event)
+            self.case_timeline_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(str(event_map.get("timestamp"))))
+            self.case_timeline_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(str(event_map.get("type"))))
+            self.case_timeline_table.setItem(idx, 2, QtWidgets.QTableWidgetItem(str(event_map.get("description"))))
 
-        alerts = self.db.alerts_for_case(case_id)
         self.case_alerts_table.setRowCount(len(alerts))
         for idx, alert in enumerate(alerts):
-            level = alert["risk_level"] if "risk_level" in alert.keys() else "Unknown"
-            domain_value = alert["domain"] if "domain" in alert.keys() else ""
-            self.case_alerts_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(alert["id"]))
-            self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(f"{alert['score']:.1f}"))
+            level = alert.get("risk_level") or "Unknown"
+            domain_value = alert.get("domain") or ""
+            self.case_alerts_table.setItem(idx, 0, QtWidgets.QTableWidgetItem(alert.get("id", "")))
+            score_val = alert.get("score")
+            score_text = f"{score_val:.1f}" if isinstance(score_val, (int, float)) else ""
+            self.case_alerts_table.setItem(idx, 1, QtWidgets.QTableWidgetItem(score_text))
             self.case_alerts_table.setCellWidget(idx, 2, create_pill(level, self._risk_state(level)))
             self.case_alerts_table.setItem(idx, 3, QtWidgets.QTableWidgetItem(domain_value))
-        case_row = self.db.get_case(case_id)
-        triggers = []
-        if case_row:
-            triggers = (case_row["policy_triggers"] or "").split(",") if "policy_triggers" in case_row.keys() else []
+
+        triggers = (case_row.get("policy_triggers") or "").split(",") if "policy_triggers" in case_row else []
         tooltip = "\n".join([t for t in triggers if t]) or "No policy triggers"
         self.case_policy_btn.setToolTip(tooltip)
 
     def _risk_color(self, level: str) -> str:
+(self, level: str) -> str:
         return severity_color(level)
 
     def _risk_state(self, level: str) -> str:
@@ -1019,12 +1040,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return mapping.get(status, "neutral")
 
     def _load_audit(self):
-        rows = self.audit.recent(limit=200)
+        run_in_background(lambda: self.audit.recent(limit=200), self._load_audit_rows)
+
+    def _load_audit_rows(self, rows: list | None, error: Exception | None = None) -> None:
+        if error or rows is None:
+            return
         table = self.audit_table
         table.setUpdatesEnabled(False)
         table.setRowCount(len(rows))
         for idx, row in enumerate(rows):
-            values = [row["timestamp"], row["username"], row["action"], row["target"] or ""]
+            values = [row.get("timestamp"), row.get("username"), row.get("action"), row.get("target") or ""]
             for col, value in enumerate(values):
                 table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
         table.setUpdatesEnabled(True)
@@ -1070,12 +1095,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actor_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
         self.actor_table.setUpdatesEnabled(True)
 
-    def _load_evidence_table(self):
+    def _load_evidence_table(self, rows: Optional[list] = None):
         case_id = sanitize_text(self.evidence_case_input.text(), max_length=128)
-        if not case_id:
-            self.evidence_table.setRowCount(0)
-            return
-        seal_record = self.db.sealed_case(case_id)
+        seal_record = self.db.sealed_case(case_id) if case_id else None
         seal_dict = dict(seal_record) if seal_record else None
         if seal_dict:
             self.seal_metadata_label.setText(
@@ -1083,47 +1105,21 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         else:
             self.seal_metadata_label.setText("Seal metadata: none")
-        rows = [dict(r) for r in list_evidence(self.db, case_id)]
-        filtered: list[dict] = []
+        source_rows = rows or self.evidence_repo.list_evidence(limit=300)
+        normalized = [vars(r) if hasattr(r, "__dict__") else dict(r) for r in source_rows]
         type_filter = self.evidence_filter_type.currentText()
         importance_filter = self.evidence_filter_importance.currentText()
-        for row in rows:
-            if type_filter != "any" and row.get("evidence_type") != type_filter:
+        filtered: list[dict] = []
+        for row in normalized:
+            if case_id and row.get("case_id") not in {case_id, None}:
                 continue
-            if importance_filter != "any" and row.get("importance") != importance_filter:
+            if type_filter != "any" and row.get("kind") != type_filter:
+                continue
+            if importance_filter != "any" and row.get("importance") not in {None, importance_filter}:
                 continue
             filtered.append(row)
-        self.evidence_table.setUpdatesEnabled(False)
-        self.evidence_table.setRowCount(len(filtered))
-        for idx, row in enumerate(filtered):
-            values = [
-                row["filename"],
-                row["hash"],
-                row["added_by"],
-                "Yes" if row["sealed"] else "No",
-                row["created_at"],
-                row.get("evidence_type"),
-                row.get("tags"),
-                row.get("importance"),
-            ]
-            for col, value in enumerate(values):
-                self.evidence_table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
-            preview_col = 8
-            ocr_col = 9
-            preview_path = row.get("preview_path")
-            if preview_path:
-                pixmap = QtGui.QPixmap(str(preview_path))
-                if not pixmap.isNull():
-                    label = QtWidgets.QLabel()
-                    label.setPixmap(pixmap.scaled(96, 96, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
-                    self.evidence_table.setCellWidget(idx, preview_col, label)
-                else:
-                    self.evidence_table.setItem(idx, preview_col, QtWidgets.QTableWidgetItem("-"))
-            else:
-                self.evidence_table.setItem(idx, preview_col, QtWidgets.QTableWidgetItem("-"))
-            ocr_value = "yes" if (row.get("ocr_text")) else "no"
-            self.evidence_table.setItem(idx, ocr_col, QtWidgets.QTableWidgetItem(ocr_value))
-        self.evidence_table.setUpdatesEnabled(True)
+        self.evidence_model.set_rows(filtered)
+        apply_table_density(self.evidence_table, self.table_density)
 
     def _load_timeline_tab(self):
         case_id = sanitize_text(self.timeline_case_input.text(), max_length=128)
@@ -1469,10 +1465,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_case_details_by_id(case_id)
 
     def _load_case_details_by_id(self, case_id: str) -> None:
-        for row in range(self.case_table.rowCount()):
-            if self.case_table.item(row, 0).text() == case_id:
-                self.case_table.setCurrentCell(row, 0)
-                self._load_case_details()
+        for idx, row in enumerate(self.case_model.rows):
+            if str(row.get("id")) == case_id:
+                self.case_table.selectRow(idx)
+                self._load_case_details(case_id)
                 return
 
 
