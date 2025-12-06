@@ -21,11 +21,7 @@ class _Job(QtCore.QRunnable):
         if self.callback:
             app = QtWidgets.QApplication.instance()
             if app:
-                QtCore.QMetaObject.invokeMethod(
-                    app,
-                    lambda r=result, e=error: self.callback(r, e),
-                    QtCore.Qt.QueuedConnection,
-                )
+                QtCore.QTimer.singleShot(0, lambda r=result, e=error: self.callback(r, e))
 
 
 def run_in_background(fn: Callable[[], Any], callback: Callable[[Any, Exception | None], None] | None = None) -> None:
