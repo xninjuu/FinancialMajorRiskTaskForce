@@ -468,10 +468,10 @@ class MainWindow(QtWidgets.QMainWindow):
         splitter.setStretchFactor(1, 2)
         outer.addWidget(splitter)
 
-        self.case_refresh_btn.clicked.connect(self._load_cases)
-        self.case_close_btn.clicked.connect(self._close_selected_case)
-        self.case_timeline_btn.clicked.connect(self._open_timeline)
-        self.case_export_btn.clicked.connect(self._export_case)
+        self.case_refresh_btn.clicked.connect(lambda: self._load_cases())
+        self.case_close_btn.clicked.connect(lambda: self._close_selected_case())
+        self.case_timeline_btn.clicked.connect(lambda: self._open_timeline())
+        self.case_export_btn.clicked.connect(lambda: self._export_case())
         self.case_panel_toggle.clicked.connect(self._toggle_case_detail_panel)
         self.case_notes.installEventFilter(self)
         self.case_table.itemSelectionChanged.connect(self._load_case_details)
@@ -841,6 +841,9 @@ class MainWindow(QtWidgets.QMainWindow):
             values = [row["id"], row["status"], row["priority"], row["created_at"], row["updated_at"]]
             for col, value in enumerate(values):
                 pill_state = self._status_state(row["status"]) if col == 1 else None
+                if col == 0:
+                    table.setItem(idx, col, QtWidgets.QTableWidgetItem(str(value)))
+                    continue
                 if pill_state:
                     table.setCellWidget(idx, col, create_pill(str(value), pill_state))
                 else:
@@ -851,6 +854,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_case_details()
         apply_table_density(table, self.table_density)
         table.setUpdatesEnabled(True)
+
+    def _selected_case_id(self) -> str | None:
+        row = self.case_table.currentRow()
+        if row < 0:
+            return None
+        item = self.case_table.item(row, 0)
+        if item and item.text():
+            return item.text()
+        return None
 
     def _toggle_case_detail_panel(self) -> None:
         if not hasattr(self, "case_splitter"):
@@ -1057,10 +1069,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not validate_role(self.role) or self.role not in {"LEAD", "ADMIN"}:
             QtWidgets.QMessageBox.warning(self, "Access denied", "Only LEAD or ADMIN can close cases.")
             return
-        row = self.case_table.currentRow()
-        if row < 0:
+        case_id = self._selected_case_id()
+        if not case_id:
             return
-        case_id = self.case_table.item(row, 0).text()
         self.db.update_case_status(case_id, status="CLOSED")
         self.audit.log(self.username, AuditAction.CASE_STATUS_CHANGE.value, target=case_id, details="Closed from UI")
         note_text = sanitize_text(self.case_notes.toPlainText(), max_length=500, allow_newlines=False)
@@ -1071,10 +1082,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_all()
 
     def _open_timeline(self):
-        row = self.case_table.currentRow()
-        if row < 0:
+        case_id = self._selected_case_id()
+        if not case_id:
             return
-        case_id = self.case_table.item(row, 0).text()
         dialog = CaseTimelineDialog(self.db, case_id, self)
         dialog.exec()
 
@@ -1082,10 +1092,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.settings:
             QtWidgets.QMessageBox.warning(self, "Config", "Settings unavailable for export path.")
             return
-        row = self.case_table.currentRow()
-        if row < 0:
+        case_id = self._selected_case_id()
+        if not case_id:
             return
-        case_id = self.case_table.item(row, 0).text()
         try:
             redacted = self.case_redacted.isChecked()
             watermark = sanitize_text(self.case_watermark.text(), max_length=64) or None

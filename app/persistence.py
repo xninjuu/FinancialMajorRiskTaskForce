@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
@@ -18,6 +19,7 @@ class PersistenceLayer:
         ensure_parent_dir(self.db_path)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -184,30 +186,31 @@ class PersistenceLayer:
         cursor.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
 
     def record_transaction(self, tx: Transaction) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO transactions (
-                id, account_id, timestamp, amount, currency,
-                counterparty_country, channel, is_credit, merchant_category, purpose, device_id, card_present
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                tx.id,
-                tx.account_id,
-                tx.timestamp.isoformat(),
-                tx.amount,
-                tx.currency,
-                tx.counterparty_country,
-                tx.channel,
-                int(tx.is_credit),
-                tx.merchant_category,
-                tx.purpose,
-                tx.device_id,
-                int(tx.card_present) if tx.card_present is not None else None,
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO transactions (
+                    id, account_id, timestamp, amount, currency,
+                    counterparty_country, channel, is_credit, merchant_category, purpose, device_id, card_present
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tx.id,
+                    tx.account_id,
+                    tx.timestamp.isoformat(),
+                    tx.amount,
+                    tx.currency,
+                    tx.counterparty_country,
+                    tx.channel,
+                    int(tx.is_credit),
+                    tx.merchant_category,
+                    tx.purpose,
+                    tx.device_id,
+                    int(tx.card_present) if tx.card_present is not None else None,
+                ),
+            )
+            self.conn.commit()
 
     def recent_transactions(self, account_id: str, *, window: timedelta) -> List[Transaction]:
         cursor = self.conn.cursor()
@@ -224,69 +227,72 @@ class PersistenceLayer:
         return [self._row_to_transaction(row) for row in rows]
 
     def record_case(self, case: Case) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO cases (id, status, label, priority, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                case.id,
-                case.status.name,
-                case.label.name if case.label else None,
-                case.priority,
-                case.created_at.isoformat(),
-                case.updated_at.isoformat(),
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO cases (id, status, label, priority, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case.id,
+                    case.status.name,
+                    case.label.name if case.label else None,
+                    case.priority,
+                    case.created_at.isoformat(),
+                    case.updated_at.isoformat(),
+                ),
+            )
+            self.conn.commit()
         self._record_notes(case)
 
     def _record_notes(self, case: Case) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM case_notes WHERE case_id = ?", (case.id,))
-        for note in case.notes:
-            cursor.execute(
-                """
-                INSERT INTO case_notes (case_id, author, message, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (case.id, note.author, note.message, note.created_at.isoformat()),
-            )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM case_notes WHERE case_id = ?", (case.id,))
+            for note in case.notes:
+                cursor.execute(
+                    """
+                    INSERT INTO case_notes (case_id, author, message, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (case.id, note.author, note.message, note.created_at.isoformat()),
+                )
+            self.conn.commit()
 
     def record_alert(self, alert: Alert, risk_level: str) -> None:
-        cursor = self.conn.cursor()
-        rationales = [
-            {
-                "code": hit.indicator.code,
-                "description": hit.indicator.description,
-                "explanation": hit.explanation,
-                "is_hit": hit.is_hit,
-                "weight": hit.indicator.weight,
-            }
-            for hit in alert.evaluated_indicators
-        ]
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO alerts (
-                id, transaction_id, score, risk_level, domain, created_at, case_id, rationales
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                alert.id,
-                alert.transaction.id,
-                alert.score,
-                risk_level,
-                alert.evaluated_indicators[0].indicator.domain.name
-                if alert.evaluated_indicators
-                else "UNKNOWN",
-                alert.created_at.isoformat(),
-                alert.case_id,
-                json.dumps(rationales),
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            rationales = [
+                {
+                    "code": hit.indicator.code,
+                    "description": hit.indicator.description,
+                    "explanation": hit.explanation,
+                    "is_hit": hit.is_hit,
+                    "weight": hit.indicator.weight,
+                }
+                for hit in alert.evaluated_indicators
+            ]
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO alerts (
+                    id, transaction_id, score, risk_level, domain, created_at, case_id, rationales
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    alert.id,
+                    alert.transaction.id,
+                    alert.score,
+                    risk_level,
+                    alert.evaluated_indicators[0].indicator.domain.name
+                    if alert.evaluated_indicators
+                    else "UNKNOWN",
+                    alert.created_at.isoformat(),
+                    alert.case_id,
+                    json.dumps(rationales),
+                ),
+            )
+            self.conn.commit()
 
     def list_alerts(
         self,
@@ -354,29 +360,30 @@ class PersistenceLayer:
 
     # region Tasks
     def upsert_task(self, task: Task) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO tasks (
-                id, title, description, created_by, assignee, priority, status,
-                related_case_id, related_alert_id, due_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                task.id,
-                task.title,
-                task.description,
-                task.created_by,
-                task.assignee,
-                task.priority,
-                task.status.name,
-                task.related_case_id,
-                task.related_alert_id,
-                task.due_at.isoformat() if task.due_at else None,
-                task.created_at.isoformat(),
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO tasks (
+                    id, title, description, created_by, assignee, priority, status,
+                    related_case_id, related_alert_id, due_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task.id,
+                    task.title,
+                    task.description,
+                    task.created_by,
+                    task.assignee,
+                    task.priority,
+                    task.status.name,
+                    task.related_case_id,
+                    task.related_alert_id,
+                    task.due_at.isoformat() if task.due_at else None,
+                    task.created_at.isoformat(),
+                ),
+            )
+            self.conn.commit()
 
     def list_tasks(
         self,
@@ -404,9 +411,10 @@ class PersistenceLayer:
         return [self._row_to_task(row) for row in rows]
 
     def update_task_status(self, task_id: str, status: TaskStatus) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (status.name, task_id))
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (status.name, task_id))
+            self.conn.commit()
 
     def _row_to_task(self, row: sqlite3.Row) -> Task:
         due_at = datetime.fromisoformat(row["due_at"]) if row["due_at"] else None
@@ -452,23 +460,24 @@ class PersistenceLayer:
         watermark: str | None = None,
         manifest: str | None = None,
     ) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO forensic_exports (case_id, path, hash, created_at, redacted, watermark, manifest)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                case_id,
-                path,
-                hash_value,
-                datetime.utcnow().isoformat(),
-                int(redacted),
-                watermark,
-                manifest,
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO forensic_exports (case_id, path, hash, created_at, redacted, watermark, manifest)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case_id,
+                    path,
+                    hash_value,
+                    datetime.utcnow().isoformat(),
+                    int(redacted),
+                    watermark,
+                    manifest,
+                ),
+            )
+            self.conn.commit()
 
     def record_evidence(
         self,
@@ -484,30 +493,31 @@ class PersistenceLayer:
         preview_path: str | None = None,
         ocr_text: str | None = None,
     ) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO evidence (
-                case_id, filename, hash, added_by, sealed, created_at,
-                evidence_type, tags, importance, preview_path, ocr_text
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO evidence (
+                    case_id, filename, hash, added_by, sealed, created_at,
+                    evidence_type, tags, importance, preview_path, ocr_text
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case_id,
+                    filename,
+                    hash_value,
+                    added_by,
+                    int(sealed),
+                    datetime.utcnow().isoformat(),
+                    evidence_type,
+                    tags,
+                    importance,
+                    preview_path,
+                    ocr_text,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                case_id,
-                filename,
-                hash_value,
-                added_by,
-                int(sealed),
-                datetime.utcnow().isoformat(),
-                evidence_type,
-                tags,
-                importance,
-                preview_path,
-                ocr_text,
-            ),
-        )
-        self.conn.commit()
+            self.conn.commit()
 
     def list_evidence(self, case_id: str) -> list[sqlite3.Row]:
         cursor = self.conn.cursor()
@@ -544,22 +554,23 @@ class PersistenceLayer:
         merkle_root: str | None = None,
         seal_reason: str | None = None,
     ) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO sealed_cases (case_id, hash, sealed_at, sealed_by, merkle_root, seal_reason)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                case_id,
-                hash_value,
-                datetime.utcnow().isoformat(),
-                sealed_by,
-                merkle_root,
-                seal_reason,
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO sealed_cases (case_id, hash, sealed_at, sealed_by, merkle_root, seal_reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case_id,
+                    hash_value,
+                    datetime.utcnow().isoformat(),
+                    sealed_by,
+                    merkle_root,
+                    seal_reason,
+                ),
+            )
+            self.conn.commit()
 
     def sealed_case(self, case_id: str) -> sqlite3.Row | None:
         cursor = self.conn.cursor()
@@ -575,15 +586,16 @@ class PersistenceLayer:
         confidence: float | None = None,
         reason_token: str | None = None,
     ) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO correlations (alert_id, related_id, reason, created_at, confidence, reason_token)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (alert_id, related_id, reason, datetime.utcnow().isoformat(), confidence, reason_token),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO correlations (alert_id, related_id, reason, created_at, confidence, reason_token)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (alert_id, related_id, reason, datetime.utcnow().isoformat(), confidence, reason_token),
+            )
+            self.conn.commit()
 
     def list_correlations(self, alert_id: str, *, limit: int = 200) -> list[sqlite3.Row]:
         limit = max(1, min(limit, 500))
@@ -618,19 +630,20 @@ class PersistenceLayer:
         return cursor.fetchall()
 
     def upsert_baseline(self, customer_id: str, avg_amount: float, tx_count: int) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO baselines (customer_id, avg_amount, tx_count, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(customer_id) DO UPDATE SET
-                avg_amount=excluded.avg_amount,
-                tx_count=excluded.tx_count,
-                updated_at=excluded.updated_at
-            """,
-            (customer_id, avg_amount, tx_count, datetime.utcnow().isoformat()),
-        )
-        self.conn.commit()
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO baselines (customer_id, avg_amount, tx_count, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(customer_id) DO UPDATE SET
+                    avg_amount=excluded.avg_amount,
+                    tx_count=excluded.tx_count,
+                    updated_at=excluded.updated_at
+                """,
+                (customer_id, avg_amount, tx_count, datetime.utcnow().isoformat()),
+            )
+            self.conn.commit()
 
     def fetch_baseline(self, customer_id: str) -> sqlite3.Row | None:
         cursor = self.conn.cursor()
