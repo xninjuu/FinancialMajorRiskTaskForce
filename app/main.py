@@ -60,6 +60,7 @@ def main() -> None:
     app_state = AppState()
     bootstrap = AppBootstrap(db)
     engine, thresholds = bootstrap.build_risk_engine()
+    bootstrap.seed_demo_cases(engine, thresholds)
     policy_engine = bootstrap.build_policy_engine()
     window = MainWindow(
         db=db,

@@ -1489,6 +1489,45 @@ class AppBootstrap:
     def build_policy_engine(self) -> PolicyEngine:
         return PolicyEngine.from_file()
 
+    def seed_demo_cases(self, engine: RiskScoringEngine, thresholds: RiskThresholds, *, minimum: int = 3) -> None:
+        if len(self.db.list_cases()) >= minimum:
+            return
+
+        customers = make_customers()
+        accounts = make_accounts(customers)
+        history: Dict[str, list[Transaction]] = {}
+
+        scenarios: list[list[Transaction]] = [
+            structuring_burst(accounts[0]),
+            pep_offshore_transactions(accounts[1]),
+            cnp_velocity(accounts[0]),
+        ]
+
+        created = 0
+        for tx in itertools.chain.from_iterable(scenarios):
+            history.setdefault(tx.account_id, []).append(tx)
+            score, evaluated = engine.score_transaction(tx, history.get(tx.account_id, []))
+            level = thresholds.level(score)
+            self.db.record_transaction(tx)
+            if level == "Low":
+                continue
+            case_id = str(uuid.uuid4())
+            alert = Alert(
+                id=str(uuid.uuid4()),
+                transaction=tx,
+                score=score,
+                evaluated_indicators=evaluated,
+                created_at=datetime.utcnow(),
+                case_id=case_id,
+            )
+            priority = "High" if level == "High" else "Medium"
+            case = Case(id=case_id, alerts=[alert], status=CaseStatus.OPEN, priority=priority)
+            self.db.record_case(case)
+            self.db.record_alert(alert, level)
+            created += 1
+            if created >= minimum:
+                break
+
     def start_simulation(self, engine: RiskScoringEngine, thresholds: RiskThresholds) -> SimulationWorker:
         accounts_map: Dict[str, str] = {}
         worker = SimulationWorker(db=self.db, engine=engine, thresholds=thresholds, accounts=accounts_map)
